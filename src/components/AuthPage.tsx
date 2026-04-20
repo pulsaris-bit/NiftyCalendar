@@ -12,22 +12,48 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Calendar, Mail, Lock, User, ArrowRight, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+import { toast } from 'sonner';
+
 interface AuthPageProps {
-  onLogin: (user: { email: string; name: string }) => void;
+  onLogin: (user: { email: string; name: string }, token: string) => void;
 }
 
 export function AuthPage({ onLogin }: AuthPageProps) {
   const [isLoading, setIsLoading] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent, type: 'login' | 'signup') => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>, type: 'login' | 'signup') => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
+    const formData = new FormData(e.currentTarget);
+    const email = type === 'login' ? formData.get('email') : formData.get('signup-email');
+    const password = type === 'login' ? formData.get('password') : formData.get('signup-password');
+    const name = formData.get('name');
+
+    try {
+      const endpoint = type === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const body = type === 'login' 
+        ? { email, password } 
+        : { email, name, password };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Er is iets misgegaan');
+      }
+
+      onLogin(data.user, data.token);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
       setIsLoading(false);
-      onLogin({ email: 'user@example.com', name: 'Nifty User' });
-    }, 1500);
+    }
   };
 
   return (
@@ -65,6 +91,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <div className="relative group">
                       <Input 
                         id="email" 
+                        name="email"
                         type="email" 
                         placeholder="name@company.com" 
                         required 
@@ -81,6 +108,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <div className="relative group">
                       <Input 
                         id="password" 
+                        name="password"
                         type="password" 
                         required 
                         className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
@@ -112,6 +140,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <div className="relative group">
                       <Input 
                         id="name" 
+                        name="name"
                         placeholder="John Doe" 
                         required 
                         className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
@@ -124,6 +153,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <div className="relative group">
                       <Input 
                         id="signup-email" 
+                        name="signup-email"
                         type="email" 
                         placeholder="name@company.com" 
                         required 
@@ -137,6 +167,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <div className="relative group">
                       <Input 
                         id="signup-password" 
+                        name="signup-password"
                         type="password" 
                         required 
                         className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
