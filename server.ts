@@ -14,6 +14,11 @@ const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "default-secret-key-123";
 
 // Database initialization
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL environment variable is not set!");
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });

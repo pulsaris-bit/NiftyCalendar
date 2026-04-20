@@ -42,7 +42,14 @@ export function AuthPage({ onLogin }: AuthPageProps) {
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      let data;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text || 'De server stuurde een ongeldig antwoord terug.');
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Er is iets misgegaan');
