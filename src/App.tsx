@@ -31,26 +31,41 @@ export default function App() {
   const [defaultDuration, setDefaultDuration] = React.useState<number>(60);
   const [selectedEvent, setSelectedEvent] = React.useState<Partial<CalendarEvent> | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isMockMode, setIsMockMode] = React.useState(false);
 
   React.useEffect(() => {
+    checkStatus();
     if (token) {
-      // Try to validate token/get user info if needed, or just let it fail on data fetch
-      // For now we just fetch data if token exists
       fetchAllData();
     } else {
       setIsLoading(false);
     }
   }, [token]);
 
+  const checkStatus = async () => {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      setIsMockMode(data.mock);
+    } catch (err) {
+      console.error("Status check failed", err);
+    }
+  };
+
   const fetchAllData = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
       const [eventsRes, catsRes, settingsRes, meRes] = await Promise.all([
-        fetch('/api/events', { headers }),
-        fetch('/api/categories', { headers }),
-        fetch('/api/user/settings', { headers }),
-        fetch('/api/auth/me', { headers })
+        fetch('/api/events', { headers, signal: controller.signal }),
+        fetch('/api/categories', { headers, signal: controller.signal }),
+        fetch('/api/user/settings', { headers, signal: controller.signal }),
+        fetch('/api/auth/me', { headers, signal: controller.signal })
       ]);
+
+      clearTimeout(timeoutId);
 
       if (eventsRes.ok && catsRes.ok && settingsRes.ok && meRes.ok) {
         const eventsData = await eventsRes.json();
@@ -266,17 +281,18 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 overflow-hidden relative">
-      <CalendarHeader 
-        currentDate={currentDate}
-        onNavigate={setCurrentDate}
-        view={view}
-        onViewChange={setView}
-        onToday={() => setCurrentDate(startOfToday())}
-        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-        user={user}
-        onLogout={handleLogout}
-        onSettings={() => setIsSettingsOpen(true)}
-      />
+        <CalendarHeader 
+          currentDate={currentDate}
+          onNavigate={setCurrentDate}
+          view={view}
+          onViewChange={setView}
+          onToday={() => setCurrentDate(startOfToday())}
+          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          user={user}
+          onLogout={handleLogout}
+          onSettings={() => setIsSettingsOpen(true)}
+          isMockMode={isMockMode}
+        />
       
       <div className="flex flex-1 overflow-hidden relative">
         {/* Mobile Sidebar Overlay */}
