@@ -3,22 +3,22 @@ services:
     build: .
     ports:
       - "3000:3000"
-    restart: always
     environment:
-      - DATABASE_URL=postgres://calendar_user:calendar_pass@db:5432/calendar_db
+      - DATABASE_URL=postgresql://user:password@db:5432/nifty_calendar
+      - NODE_ENV=production
     depends_on:
       - db
+    restart: always
 
   db:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_USER=calendar_user
-      - POSTGRES_PASSWORD=calendar_pass
-      - POSTGRES_DB=calendar_db
-    ports:
-      - "5433:5432"
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=nifty_calendar
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: always
 
 volumes:
   postgres_data:
