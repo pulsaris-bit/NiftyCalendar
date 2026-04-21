@@ -37,6 +37,7 @@ interface CalendarHeaderProps {
   user: { name: string; email: string } | null;
   onLogout: () => void;
   onSettings: () => void;
+  isMockMode?: boolean;
 }
 
 export function CalendarHeader({
@@ -48,7 +49,8 @@ export function CalendarHeader({
   onToggleSidebar,
   user,
   onLogout,
-  onSettings
+  onSettings,
+  isMockMode = false
 }: CalendarHeaderProps) {
   const handlePrev = () => {
     if (view === 'month' || view === 'agenda') onNavigate(subMonths(currentDate, 1));
@@ -84,9 +86,14 @@ export function CalendarHeader({
           <div className="w-8 h-8 bg-[#C36322] rounded-lg flex items-center justify-center text-white font-bold shadow-sm shrink-0">
             N
           </div>
-          <span className="text-lg font-semibold tracking-tight text-slate-700 hidden md:inline truncate">
-            NiftyCalendar
-          </span>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold tracking-tight text-slate-700 hidden md:inline truncate leading-tight">
+              NiftyCalendar
+            </span>
+            {isMockMode && (
+              <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded font-bold w-fit leading-none py-0.5 ml-0 md:ml-0.5">MOCK</span>
+            )}
+          </div>
         </div>
 
         <div className="hidden lg:flex bg-gray-100 p-1 rounded-md text-sm">

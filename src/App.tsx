@@ -17,30 +17,122 @@ import { startOfToday } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 export default function App() {
-  const [user, setUser] = React.useState<{ email: string; name: string; id: number } | null>(null);
+  const [user, setUser] = React.useState<{ email: string; name: string } | null>(null);
+  const [token, setToken] = React.useState<string | null>(localStorage.getItem('token'));
   const [currentDate, setCurrentDate] = React.useState(startOfToday());
   const [view, setView] = React.useState<CalendarView>('month');
-  const [events, setEvents] = React.useState<CalendarEvent[]>(INITIAL_EVENTS);
-  const [categories, setCategories] = React.useState<CalendarCategory[]>(INITIAL_CATEGORIES);
+  const [events, setEvents] = React.useState<CalendarEvent[]>([]);
+  const [categories, setCategories] = React.useState<CalendarCategory[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [highlightWeekends, setHighlightWeekends] = React.useState(false);
-  const [defaultCalendarId, setDefaultCalendarId] = React.useState<string>(INITIAL_CATEGORIES[0].id);
+  const [defaultCalendarId, setDefaultCalendarId] = React.useState<string>('');
   const [defaultDuration, setDefaultDuration] = React.useState<number>(60);
   const [selectedEvent, setSelectedEvent] = React.useState<Partial<CalendarEvent> | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [isMockMode, setIsMockMode] = React.useState(false);
 
-  const handleLogin = (userData: { email: string; name: string }) => {
+  React.useEffect(() => {
+    checkStatus();
+    if (token) {
+      fetchAllData();
+    } else {
+      setIsLoading(false);
+    }
+  }, [token]);
+
+  const checkStatus = async () => {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      setIsMockMode(data.mock);
+    } catch (err) {
+      console.error("Status check failed", err);
+    }
+  };
+
+  const fetchAllData = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+    try {
+      const headers = { 'Authorization': `Bearer ${token}` };
+      const [eventsRes, catsRes, settingsRes, meRes] = await Promise.all([
+        fetch('/api/events', { headers, signal: controller.signal }),
+        fetch('/api/categories', { headers, signal: controller.signal }),
+        fetch('/api/user/settings', { headers, signal: controller.signal }),
+        fetch('/api/auth/me', { headers, signal: controller.signal })
+      ]);
+
+      clearTimeout(timeoutId);
+
+      if (eventsRes.ok && catsRes.ok && settingsRes.ok && meRes.ok) {
+        const eventsData = await eventsRes.json();
+        const catsData = await catsRes.json();
+        const settingsData = await settingsRes.json();
+        const meData = await meRes.json();
+
+        setUser({ email: meData.email, name: meData.name });
+
+        // Convert date strings back to Date objects
+        const formattedEvents = eventsData.map((e: any) => ({
+          ...e,
+          start: new Date(e.start),
+          end: new Date(e.end)
+        }));
+
+        setEvents(formattedEvents);
+        setCategories(catsData);
+        
+        // Apply settings
+        if (settingsData.highlightWeekends !== undefined) setHighlightWeekends(settingsData.highlightWeekends);
+        if (settingsData.defaultCalendarId) setDefaultCalendarId(settingsData.defaultCalendarId);
+        if (settingsData.defaultDuration) setDefaultDuration(settingsData.defaultDuration);
+        
+        // If no default calendar set but categories exist, set one
+        if (!settingsData.defaultCalendarId && catsData.length > 0) {
+          setDefaultCalendarId(catsData[0].id);
+        }
+
+        // Mock user from token decode or separate endpoint if needed
+        // For simplicity, we assume the token is enough for now or we could have a /api/auth/me
+      } else if (eventsRes.status === 401 || eventsRes.status === 403) {
+        handleLogout();
+      }
+    } catch (err) {
+      console.error("Failed to fetch data", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLogin = (userData: { email: string; name: string }, authToken: string) => {
     setUser(userData);
+    setToken(authToken);
+    localStorage.setItem('token', authToken);
     toast.success(`Welkom terug, ${userData.name}!`);
   };
 
   const handleLogout = () => {
     setUser(null);
+    setToken(null);
+    localStorage.removeItem('token');
     toast.info('Succesvol uitgelogd');
   };
 
-  if (!user) {
+  if (isLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-t-[#C36322] border-gray-200 rounded-full animate-spin" />
+          <p className="text-gray-500 font-medium">Agenda laden...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!token) {
     return (
       <>
         <AuthPage onLogin={handleLogin} />
@@ -49,10 +141,28 @@ export default function App() {
     );
   }
 
-  const handleToggleCategory = (id: string) => {
-    setCategories(prev => prev.map(cat => 
-      cat.id === id ? { ...cat, isVisible: !cat.isVisible } : cat
-    ));
+  const handleToggleCategory = async (id: string) => {
+    const category = categories.find(c => c.id === id);
+    if (!category) return;
+
+    const updatedCategory = { ...category, isVisible: !category.isVisible };
+    
+    try {
+      const res = await fetch(`/api/categories/${id}`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(updatedCategory)
+      });
+
+      if (res.ok) {
+        setCategories(prev => prev.map(cat => cat.id === id ? updatedCategory : cat));
+      }
+    } catch (err) {
+      toast.error("Kon categorie niet bijwerken");
+    }
   };
 
   const handleAddEvent = () => {
@@ -79,47 +189,110 @@ export default function App() {
     setIsDialogOpen(true);
   };
 
-  const handleSaveEvent = (eventData: Partial<CalendarEvent>) => {
-    if (eventData.id) {
-      setEvents(prev => prev.map(e => e.id === eventData.id ? (eventData as CalendarEvent) : e));
-      toast.success('Afspraak bijgewerkt');
-    } else {
-      const newEvent: CalendarEvent = {
-        ...(eventData as Omit<CalendarEvent, 'id'>),
-        id: Math.random().toString(36).substr(2, 9),
-      };
-      setEvents(prev => [...prev, newEvent]);
-      toast.success('Afspraak aangemaakt');
+  const handleSaveEvent = async (eventData: Partial<CalendarEvent>) => {
+    try {
+      const isNew = !eventData.id;
+      const method = isNew ? 'POST' : 'PUT';
+      const url = isNew ? '/api/events' : `/api/events/${eventData.id}`;
+      const finalEvent = isNew ? { ...eventData, id: Math.random().toString(36).substr(2, 9) } : eventData;
+
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(finalEvent)
+      });
+
+      if (res.ok) {
+        if (isNew) {
+          setEvents(prev => [...prev, finalEvent as CalendarEvent]);
+          toast.success('Afspraak aangemaakt');
+        } else {
+          setEvents(prev => prev.map(e => e.id === eventData.id ? (eventData as CalendarEvent) : e));
+          toast.success('Afspraak bijgewerkt');
+        }
+        setIsDialogOpen(false);
+      } else {
+        throw new Error("Opslaan mislukt");
+      }
+    } catch (err) {
+      toast.error("Kon afspraak niet opslaan");
     }
-    setIsDialogOpen(false);
   };
 
-  const handleDeleteEvent = (id: string) => {
-    setEvents(prev => prev.filter(e => e.id !== id));
-    toast.success('Afspraak verwijderd');
-    setIsDialogOpen(false);
+  const handleDeleteEvent = async (id: string) => {
+    try {
+      const res = await fetch(`/api/events/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        setEvents(prev => prev.filter(e => e.id !== id));
+        toast.success('Afspraak verwijderd');
+        setIsDialogOpen(false);
+      }
+    } catch (err) {
+      toast.error("Kon afspraak niet verwijderen");
+    }
   };
 
-  const handleEventMove = (eventId: string, newStart: Date, newEnd: Date) => {
-    setEvents(prev => prev.map(event => 
-      event.id === eventId ? { ...event, start: newStart, end: newEnd } : event
-    ));
-    toast.success('Afspraak verplaatst');
+  const handleEventMove = async (eventId: string, newStart: Date, newEnd: Date) => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const updatedEvent = { ...event, start: newStart, end: newEnd };
+    
+    try {
+      const res = await fetch(`/api/events/${eventId}`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(updatedEvent)
+      });
+
+      if (res.ok) {
+        setEvents(prev => prev.map(e => e.id === eventId ? updatedEvent : e));
+        toast.success('Afspraak verplaatst');
+      }
+    } catch (err) {
+      toast.error("Kon afspraak niet verplaatsen");
+    }
+  };
+
+  const updateSettings = async (newSettings: any) => {
+    try {
+      await fetch('/api/user/settings', {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(newSettings)
+      });
+    } catch (err) {
+      console.error("Failed to save settings", err);
+    }
   };
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 overflow-hidden relative">
-      <CalendarHeader 
-        currentDate={currentDate}
-        onNavigate={setCurrentDate}
-        view={view}
-        onViewChange={setView}
-        onToday={() => setCurrentDate(startOfToday())}
-        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-        user={user}
-        onLogout={handleLogout}
-        onSettings={() => setIsSettingsOpen(true)}
-      />
+        <CalendarHeader 
+          currentDate={currentDate}
+          onNavigate={setCurrentDate}
+          view={view}
+          onViewChange={setView}
+          onToday={() => setCurrentDate(startOfToday())}
+          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          user={user}
+          onLogout={handleLogout}
+          onSettings={() => setIsSettingsOpen(true)}
+          isMockMode={isMockMode}
+        />
       
       <div className="flex flex-1 overflow-hidden relative">
         {/* Mobile Sidebar Overlay */}
@@ -189,20 +362,28 @@ export default function App() {
             <SettingsPage 
               categories={categories} 
               highlightWeekends={highlightWeekends}
-              onUpdateHighlightWeekends={setHighlightWeekends}
+              onUpdateHighlightWeekends={(val) => {
+                setHighlightWeekends(val);
+                updateSettings({ highlightWeekends: val, defaultCalendarId, defaultDuration });
+              }}
               defaultCalendarId={defaultCalendarId}
-              onUpdateDefaultCalendarId={setDefaultCalendarId}
+              onUpdateDefaultCalendarId={(id) => {
+                setDefaultCalendarId(id);
+                updateSettings({ highlightWeekends, defaultCalendarId: id, defaultDuration });
+              }}
               defaultDuration={defaultDuration}
-              onUpdateDefaultDuration={setDefaultDuration}
+              onUpdateDefaultDuration={(dur) => {
+                setDefaultDuration(dur);
+                updateSettings({ highlightWeekends, defaultCalendarId, defaultDuration: dur });
+              }}
               onUpdateCategories={(newCats) => {
                 setCategories(newCats);
-                // Ensure default calendar is still valid
-                if (!newCats.find(c => c.id === defaultCalendarId) && newCats.length > 0) {
-                  setDefaultCalendarId(newCats[0].id);
-                }
-                toast.success('Instellingen opgeslagen');
+                // For now we just update locally as we don't have a bulk API yet
+                // but we close the settings.
+                setIsSettingsOpen(false);
               }}
               onImportEvents={(newEvents) => {
+                // In a real app we'd bulk upload these to the server
                 setEvents(prev => [...prev, ...newEvents]);
               }}
               onClose={() => setIsSettingsOpen(false)} 

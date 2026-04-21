@@ -11,40 +11,52 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Calendar, Mail, Lock, User, ArrowRight, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
 import { toast } from 'sonner';
 
 interface AuthPageProps {
-  onLogin: (user: { email: string; name: string; id: number }) => void;
+  onLogin: (user: { email: string; name: string }, token: string) => void;
 }
 
 export function AuthPage({ onLogin }: AuthPageProps) {
   const [isLoading, setIsLoading] = React.useState(false);
 
-  const handleSubmit = async (e: React.FormEvent, type: 'login' | 'signup') => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>, type: 'login' | 'signup') => {
     e.preventDefault();
     setIsLoading(true);
-
-    const formData = new FormData(e.currentTarget as HTMLFormElement);
-    const data = Object.fromEntries(formData.entries());
+    
+    const formData = new FormData(e.currentTarget);
+    const email = type === 'login' ? formData.get('email') : formData.get('signup-email');
+    const password = type === 'login' ? formData.get('password') : formData.get('signup-password');
+    const name = formData.get('name');
 
     try {
-      const endpoint = type === 'login' ? '/api/auth/login' : '/api/auth/signup';
+      const endpoint = type === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const body = type === 'login' 
+        ? { email, password } 
+        : { email, name, password };
+
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(body),
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Er is iets misgegaan');
+      let data;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text || 'De server stuurde een ongeldig antwoord terug.');
       }
 
-      toast.success(type === 'login' ? 'Succesvol ingelogd' : 'Account aangemaakt');
-      onLogin(result);
+      if (!response.ok) {
+        throw new Error(data.error || 'Er is iets misgegaan');
+      }
+
+      onLogin(data.user, data.token);
     } catch (err: any) {
-      console.error('Auth error:', err);
       toast.error(err.message);
     } finally {
       setIsLoading(false);
@@ -148,7 +160,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <div className="relative group">
                       <Input 
                         id="signup-email" 
-                        name="email"
+                        name="signup-email"
                         type="email" 
                         placeholder="name@company.com" 
                         required 
@@ -162,7 +174,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <div className="relative group">
                       <Input 
                         id="signup-password" 
-                        name="password"
+                        name="signup-password"
                         type="password" 
                         required 
                         className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"

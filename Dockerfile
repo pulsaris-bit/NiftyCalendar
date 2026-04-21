@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-slim AS build
+FROM node:20-slim
 
 WORKDIR /app
 
@@ -12,30 +12,14 @@ RUN npm install
 # Copy source files
 COPY . .
 
-# Build the application
+# Build the frontend assets
 RUN npm run build
-
-# Production stage
-FROM node:20-slim
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-RUN npm install --production
-
-# Copy built assets and server code
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/server.ts ./server.ts
-COPY --from=build /app/package.json ./package.json
-
-# Install tsx to run server.ts
-RUN npm install -g tsx
 
 # Expose port 3000
 EXPOSE 3000
 
+# Set environment to production
 ENV NODE_ENV=production
 
-# Start the server
-CMD ["tsx", "server.ts"]
+# Start the Express server using tsx
+CMD ["npx", "tsx", "server.ts"]
