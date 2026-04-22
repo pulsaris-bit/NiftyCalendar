@@ -387,6 +387,7 @@ export default function App() {
                 setEvents(prev => [...prev, ...newEvents]);
               }}
               onClose={() => setIsSettingsOpen(false)} 
+              token={token}
             />
           </div>
         </div>

@@ -23,18 +23,12 @@ const mockDb = {
   users: [] as any[],
   categories: [] as any[],
   events: [] as any[],
+  shares: [] as any[],
 };
 
 if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL environment variable is not set! Running in MOCK MODE (in-memory). Data will be lost on restart.");
   isMockMode = true;
-  
-  // Seed mock categories
-  mockDb.categories.push(
-    { id: 'personal-mock', user_id: 1, name: 'Persoonlijk', color: '#C36322', is_visible: true },
-    { id: 'work-mock', user_id: 1, name: 'Werk', color: '#1a1a1a', is_visible: true },
-    { id: 'family-mock', user_id: 1, name: 'Familie', color: '#10b981', is_visible: true }
-  );
 } else {
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -72,7 +66,7 @@ async function initDb(retries = 5, delay = 5000) {
           CREATE TABLE IF NOT EXISTS events (
             id TEXT PRIMARY KEY,
             user_id INTEGER REFERENCES users(id),
-            calendar_id TEXT REFERENCES categories(id),
+            calendar_id TEXT REFERENCES categories(id) ON DELETE CASCADE,
             title TEXT NOT NULL,
             start_time TIMESTAMP WITH TIME ZONE NOT NULL,
             end_time TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -80,6 +74,13 @@ async function initDb(retries = 5, delay = 5000) {
             location TEXT,
             is_all_day BOOLEAN DEFAULT false,
             color TEXT
+          );
+
+          CREATE TABLE IF NOT EXISTS category_shares (
+            category_id TEXT REFERENCES categories(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            can_edit BOOLEAN DEFAULT false,
+            PRIMARY KEY (category_id, user_id)
           );
         `);
         console.log("Database initialized successfully");
@@ -141,11 +142,18 @@ app.post("/api/auth/register", async (req, res) => {
   try {
     if (isMockMode) {
       if (mockDb.users.some(u => u.email === email)) throw new Error("Email already registered");
-      const newUser = { id: mockDb.users.length + 1, email, name, password_hash: hash, settings: {} };
+      const userId = mockDb.users.length + 1;
+      const newUser = { id: userId, email, name, password_hash: hash, settings: {} };
       mockDb.users.push(newUser);
       
-      const token = jwt.sign({ id: newUser.id, email, name }, JWT_SECRET);
-      return res.json({ user: { id: newUser.id, email, name }, token });
+      // Seed categories in mock mode
+      mockDb.categories.push(
+        { id: `personal-${userId}`, user_id: userId, name: 'Persoonlijk', color: '#3b82f6', is_visible: true },
+        { id: `work-${userId}`, user_id: userId, name: 'Werk', color: '#22c55e', is_visible: true }
+      );
+      
+      const token = jwt.sign({ id: userId, email, name }, JWT_SECRET);
+      return res.json({ user: { id: userId, email, name }, token });
     }
     const result = await pool.query(
       "INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id, email, name",
@@ -156,9 +164,8 @@ app.post("/api/auth/register", async (req, res) => {
     const userId = result.rows[0].id;
     await pool.query(`
       INSERT INTO categories (id, user_id, name, color, is_visible) VALUES 
-      ('personal-' || $1::text, $1, 'Persoonlijk', '#C36322', true),
-      ('work-' || $1::text, $1, 'Werk', '#1a1a1a', true),
-      ('family-' || $1::text, $1, 'Familie', '#10b981', true)
+      ('personal-' || $1::text, $1, 'Persoonlijk', '#3b82f6', true),
+      ('work-' || $1::text, $1, 'Werk', '#22c55e', true)
     `, [userId]);
 
     const token = jwt.sign({ id: userId, email, name }, JWT_SECRET);
@@ -227,21 +234,121 @@ app.put("/api/user/settings", authenticateToken, async (req: any, res) => {
 app.get("/api/categories", authenticateToken, async (req: any, res) => {
   try {
     if (isMockMode) {
-      // In mock mode, we just return all categories for now
-      return res.json(mockDb.categories.map(row => ({
-        id: row.id,
-        name: row.name,
-        color: row.color,
-        isVisible: row.is_visible
-      })));
+      const owned = mockDb.categories.filter(c => c.user_id === req.user.id);
+      const sharedMappings = mockDb.shares.filter(s => s.user_id === req.user.id);
+      const shared = mockDb.categories.filter(c => sharedMappings.some(s => s.category_id === c.id));
+      
+      const all = [...owned, ...shared].map(row => {
+        const share = sharedMappings.find(s => s.category_id === row.id);
+        const isOwner = row.user_id === req.user.id;
+        return {
+          id: row.id,
+          name: row.name,
+          color: row.color,
+          isVisible: row.is_visible,
+          isOwner,
+          canEdit: isOwner || (share ? share.can_edit : false)
+        };
+      });
+      return res.json(all);
     }
-    const result = await pool.query("SELECT * FROM categories WHERE user_id = $1", [req.user.id]);
+    const result = await pool.query(`
+      SELECT c.*, 
+             (c.user_id = $1) as is_owner,
+             COALESCE(cs.can_edit, false) OR (c.user_id = $1) as can_edit
+      FROM categories c
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
+      WHERE c.user_id = $1 OR cs.user_id = $1
+    `, [req.user.id]);
     res.json(result.rows.map(row => ({
       id: row.id,
       name: row.name,
       color: row.color,
-      isVisible: row.is_visible
+      isVisible: row.is_visible,
+      isOwner: row.is_owner,
+      canEdit: row.can_edit
     })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/categories/:id/shares", authenticateToken, async (req: any, res) => {
+  try {
+    if (isMockMode) {
+      const category = mockDb.categories.find(c => c.id === req.params.id && c.user_id === req.user.id);
+      if (!category) return res.status(403).json({ error: "Access denied" });
+      const shares = mockDb.shares.filter(s => s.category_id === req.params.id).map(s => {
+        const user = mockDb.users.find(u => u.id === s.user_id);
+        return { userId: s.user_id, username: user?.name, canEdit: s.can_edit };
+      });
+      return res.json(shares);
+    }
+    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    if (checkOwner.rows.length === 0) return res.status(403).json({ error: "Access denied" });
+
+    const result = await pool.query(`
+      SELECT cs.user_id as "userId", u.name as "username", cs.can_edit as "canEdit"
+      FROM category_shares cs
+      JOIN users u ON cs.user_id = u.id
+      WHERE cs.category_id = $1
+    `, [req.params.id]);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/categories/:id/share", authenticateToken, async (req: any, res) => {
+  const { username, canEdit } = req.body;
+  try {
+    if (isMockMode) {
+      const category = mockDb.categories.find(c => c.id === req.params.id && c.user_id === req.user.id);
+      if (!category) return res.status(403).json({ error: "Access denied" });
+      const targetUser = mockDb.users.find(u => u.name === username);
+      if (!targetUser) return res.status(404).json({ error: "Gebruiker niet gevonden" });
+      if (targetUser.id === req.user.id) return res.status(400).json({ error: "Je kunt niet met jezelf delen" });
+
+      const existing = mockDb.shares.find(s => s.category_id === req.params.id && s.user_id === targetUser.id);
+      if (existing) {
+        existing.can_edit = canEdit;
+      } else {
+        mockDb.shares.push({ category_id: req.params.id, user_id: targetUser.id, can_edit: canEdit });
+      }
+      return res.json({ success: true });
+    }
+    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    if (checkOwner.rows.length === 0) return res.status(403).json({ error: "Access denied" });
+
+    const userRes = await pool.query("SELECT id FROM users WHERE name = $1", [username]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: "Gebruiker niet gevonden" });
+    const targetUserId = userRes.rows[0].id;
+    if (targetUserId === req.user.id) return res.status(400).json({ error: "Je kunt niet met jezelf delen" });
+
+    await pool.query(`
+      INSERT INTO category_shares (category_id, user_id, can_edit)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (category_id, user_id) DO UPDATE SET can_edit = $3
+    `, [req.params.id, targetUserId, canEdit]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/categories/:id/share/:userId", authenticateToken, async (req: any, res) => {
+  try {
+    if (isMockMode) {
+      const category = mockDb.categories.find(c => c.id === req.params.id && c.user_id === req.user.id);
+      if (!category) return res.status(403).json({ error: "Access denied" });
+      mockDb.shares = mockDb.shares.filter(s => !(s.category_id === req.params.id && s.user_id === parseInt(req.params.userId)));
+      return res.json({ success: true });
+    }
+    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    if (checkOwner.rows.length === 0) return res.status(403).json({ error: "Access denied" });
+
+    await pool.query("DELETE FROM category_shares WHERE category_id = $1 AND user_id = $2", [req.params.id, req.params.userId]);
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -271,7 +378,11 @@ app.put("/api/categories/:id", authenticateToken, async (req: any, res) => {
 app.get("/api/events", authenticateToken, async (req: any, res) => {
   try {
     if (isMockMode) {
-      return res.json(mockDb.events.filter(e => e.user_id === req.user.id).map(row => ({
+      const myCats = mockDb.categories.filter(c => c.user_id === req.user.id).map(c => c.id);
+      const sharedCats = mockDb.shares.filter(s => s.user_id === req.user.id).map(s => s.category_id);
+      const allAccessible = [...myCats, ...sharedCats];
+      
+      return res.json(mockDb.events.filter(e => allAccessible.includes(e.calendar_id)).map(row => ({
         id: row.id,
         title: row.title,
         start: row.start_time,
@@ -283,7 +394,13 @@ app.get("/api/events", authenticateToken, async (req: any, res) => {
         isAllDay: row.is_all_day
       })));
     }
-    const result = await pool.query("SELECT * FROM events WHERE user_id = $1", [req.user.id]);
+    const result = await pool.query(`
+      SELECT e.* 
+      FROM events e
+      JOIN categories c ON e.calendar_id = c.id
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
+      WHERE c.user_id = $1 OR cs.user_id = $1
+    `, [req.user.id]);
     res.json(result.rows.map(row => ({
       id: row.id,
       title: row.title,
@@ -304,6 +421,12 @@ app.post("/api/events", authenticateToken, async (req: any, res) => {
   const { id, title, start, end, description, location, calendarId, color, isAllDay } = req.body;
   try {
     if (isMockMode) {
+      const category = mockDb.categories.find(c => c.id === calendarId);
+      const isOwner = category && category.user_id === req.user.id;
+      const canEdit = isOwner || mockDb.shares.some(s => s.category_id === calendarId && s.user_id === req.user.id && s.can_edit);
+      
+      if (!category || !canEdit) return res.status(403).json({ error: "Access denied" });
+
       const newEvent = { 
         id, user_id: req.user.id, title, start_time: start, end_time: end, 
         description, location, calendar_id: calendarId, color, is_all_day: isAllDay 
@@ -311,6 +434,19 @@ app.post("/api/events", authenticateToken, async (req: any, res) => {
       mockDb.events.push(newEvent);
       return res.json(newEvent);
     }
+    
+    // Check permissions
+    const permRes = await pool.query(`
+      SELECT c.user_id = $1 as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
+      FROM categories c
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
+      WHERE c.id = $2 AND (c.user_id = $1 OR cs.user_id = $1)
+    `, [req.user.id, calendarId]);
+
+    if (permRes.rows.length === 0 || (!permRes.rows[0].is_owner && !permRes.rows[0].is_shared_editor)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const result = await pool.query(
       `INSERT INTO events (id, user_id, title, start_time, end_time, description, location, calendar_id, color, is_all_day) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
@@ -326,21 +462,41 @@ app.put("/api/events/:id", authenticateToken, async (req: any, res) => {
   const { title, start, end, description, location, calendarId, color, isAllDay } = req.body;
   try {
     if (isMockMode) {
-      const index = mockDb.events.findIndex(e => e.id === req.params.id && e.user_id === req.user.id);
-      if (index !== -1) {
-        mockDb.events[index] = { 
-          ...mockDb.events[index], 
-          title, start_time: start, end_time: end, 
-          description, location, calendar_id: calendarId, color, is_all_day: isAllDay 
-        };
-        return res.json(mockDb.events[index]);
-      }
-      return res.status(404).json({ error: "Event not found" });
+      const event = mockDb.events.find(e => e.id === req.params.id);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+
+      const category = mockDb.categories.find(c => c.id === event.calendar_id);
+      const isOwner = category && category.user_id === req.user.id;
+      const canEdit = isOwner || mockDb.shares.some(s => s.category_id === event.calendar_id && s.user_id === req.user.id && s.can_edit);
+      
+      if (!canEdit) return res.status(403).json({ error: "Access denied" });
+
+      const index = mockDb.events.findIndex(e => e.id === req.params.id);
+      mockDb.events[index] = { 
+        ...mockDb.events[index], 
+        title, start_time: start, end_time: end, 
+        description, location, calendar_id: calendarId, color, is_all_day: isAllDay 
+      };
+      return res.json(mockDb.events[index]);
     }
+
+    // Check permissions on the event/category
+    const permRes = await pool.query(`
+      SELECT c.user_id = $1 as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
+      FROM events e
+      JOIN categories c ON e.calendar_id = c.id
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
+      WHERE e.id = $2 AND (c.user_id = $1 OR cs.user_id = $1)
+    `, [req.user.id, req.params.id]);
+
+    if (permRes.rows.length === 0 || (!permRes.rows[0].is_owner && !permRes.rows[0].is_shared_editor)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const result = await pool.query(
       `UPDATE events SET title = $1, start_time = $2, end_time = $3, description = $4, location = $5, calendar_id = $6, color = $7, is_all_day = $8 
-       WHERE id = $9 AND user_id = $10 RETURNING *`,
-      [title, start, end, description, location, calendarId, color, isAllDay, req.params.id, req.user.id]
+       WHERE id = $9 RETURNING *`,
+      [title, start, end, description, location, calendarId, color, isAllDay, req.params.id]
     );
     res.json(result.rows[0]);
   } catch (err: any) {
@@ -351,10 +507,32 @@ app.put("/api/events/:id", authenticateToken, async (req: any, res) => {
 app.delete("/api/events/:id", authenticateToken, async (req: any, res) => {
   try {
     if (isMockMode) {
-      mockDb.events = mockDb.events.filter(e => !(e.id === req.params.id && e.user_id === req.user.id));
+      const event = mockDb.events.find(e => e.id === req.params.id);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+
+      const category = mockDb.categories.find(c => c.id === event.calendar_id);
+      const isOwner = category && category.user_id === req.user.id;
+      const canEdit = isOwner || mockDb.shares.some(s => s.category_id === event.calendar_id && s.user_id === req.user.id && s.can_edit);
+      
+      if (!canEdit) return res.status(403).json({ error: "Access denied" });
+
+      mockDb.events = mockDb.events.filter(e => e.id !== req.params.id);
       return res.sendStatus(204);
     }
-    await pool.query("DELETE FROM events WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+
+    const permRes = await pool.query(`
+      SELECT c.user_id = $1 as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
+      FROM events e
+      JOIN categories c ON e.calendar_id = c.id
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
+      WHERE e.id = $2 AND (c.user_id = $1 OR cs.user_id = $1)
+    `, [req.user.id, req.params.id]);
+
+    if (permRes.rows.length === 0 || (!permRes.rows[0].is_owner && !permRes.rows[0].is_shared_editor)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    await pool.query("DELETE FROM events WHERE id = $1", [req.params.id]);
     res.sendStatus(204);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

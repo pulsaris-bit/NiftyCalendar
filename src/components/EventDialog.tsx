@@ -59,9 +59,12 @@ export function EventDialog({
     }
   }, [event]);
 
+  const currentCategory = categories.find(c => c.id === formData.calendarId);
+  const canEdit = currentCategory ? currentCategory.canEdit !== false : true;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
+    if (canEdit) onSave(formData);
   };
 
   return (
@@ -70,7 +73,7 @@ export function EventDialog({
         <div className="bg-gray-50 px-6 py-4 border-b shrink-0">
            <DialogHeader>
             <DialogTitle className="text-xl font-bold text-gray-800">
-              {event?.id ? 'Afspraak wijzigen' : 'Afspraak maken'}
+              {event?.id ? (canEdit ? 'Afspraak wijzigen' : 'Afspraak details') : 'Afspraak maken'}
             </DialogTitle>
           </DialogHeader>
         </div>
@@ -83,7 +86,8 @@ export function EventDialog({
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               placeholder="Titel toevoegen"
               className="text-xl font-semibold border-0 border-b rounded-none px-0 focus-visible:ring-0 focus-visible:border-[#C36322] transition-all placeholder:text-gray-300"
-              autoFocus
+              autoFocus={canEdit}
+              disabled={!canEdit}
             />
           </div>
 
@@ -94,8 +98,9 @@ export function EventDialog({
                 checked={formData.isAllDay} 
                 onCheckedChange={(checked) => setFormData({ ...formData, isAllDay: !!checked })}
                 className="data-[state=checked]:bg-[#C36322] data-[state=checked]:border-[#C36322]"
+                disabled={!canEdit}
               />
-              <Label htmlFor="allDay" className="text-sm font-medium text-gray-600 cursor-pointer">Hele dag</Label>
+              <Label htmlFor="allDay" className={`text-sm font-medium cursor-pointer ${!canEdit ? 'text-gray-400' : 'text-gray-600'}`}>Hele dag</Label>
             </div>
 
             <div className="flex flex-col gap-3">
@@ -111,6 +116,7 @@ export function EventDialog({
                         const date = new Date(e.target.value);
                         setFormData({ ...formData, start: date, end: new Date(date.getTime() + 60*60*1000) });
                       }}
+                      disabled={!canEdit}
                     />
                   </div>
                   
@@ -130,6 +136,7 @@ export function EventDialog({
                               setFormData({ ...formData, start: date });
                             }
                           }}
+                          disabled={!canEdit}
                         />
                       </div>
                       <div className="flex-1 flex items-center gap-2">
@@ -146,6 +153,7 @@ export function EventDialog({
                               setFormData({ ...formData, end: date });
                             }
                           }}
+                          disabled={!canEdit}
                         />
                       </div>
                     </div>
@@ -159,16 +167,20 @@ export function EventDialog({
               <Select 
                 value={formData.calendarId} 
                 onValueChange={(val) => setFormData({ ...formData, calendarId: val })}
+                disabled={!canEdit}
               >
                 <SelectTrigger className="flex-1 h-9 bg-white border-gray-200 focus:ring-[#C36322]">
-                  <SelectValue placeholder="Kies agenda" />
+                  <SelectValue placeholder="Kies agenda">
+                    {categories.find(c => c.id === formData.calendarId)?.name || 'Kies agenda'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {categories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id}>
+                    <SelectItem key={cat.id} value={cat.id} disabled={cat.canEdit === false}>
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-2 rounded-full" style={{ backgroundColor: cat.color }} />
-                        {cat.name}
+                        <span className="truncate">{cat.name}</span>
+                        {cat.canEdit === false && <span className="text-[10px] text-gray-400 ml-auto">(alleen lezen)</span>}
                       </div>
                     </SelectItem>
                   ))}
@@ -183,6 +195,7 @@ export function EventDialog({
                 value={formData.location}
                 onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                 className="flex-1 h-9 bg-white focus-visible:ring-[#C36322]"
+                disabled={!canEdit}
               />
             </div>
 
@@ -193,12 +206,20 @@ export function EventDialog({
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 className="flex-1 min-h-[100px] p-2 text-sm border rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-[#C36322] border-gray-200"
+                disabled={!canEdit}
               />
             </div>
+            
+            {!canEdit && (
+              <div className="flex items-center gap-2 p-3 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium border border-blue-100">
+                <Info className="w-4 h-4" />
+                Deze agenda is met jou gedeeld (alleen lezen).
+              </div>
+            )}
           </div>
 
           <DialogFooter className="pt-4 border-t mt-auto sticky bottom-0 bg-white">
-            {event?.id && onDelete && (
+            {canEdit && event?.id && onDelete && (
               <Button 
                 type="button" 
                 variant="ghost" 
@@ -210,11 +231,13 @@ export function EventDialog({
             )}
             <div className="flex gap-2 ml-auto">
               <Button type="button" variant="outline" onClick={onClose}>
-                Annuleren
+                {canEdit ? 'Annuleren' : 'Sluiten'}
               </Button>
-              <Button type="submit" className="bg-[#C36322] hover:bg-[#a6541d] text-white px-8">
-                Opslaan
-              </Button>
+              {canEdit && (
+                <Button type="submit" className="bg-[#C36322] hover:bg-[#a6541d] text-white px-8">
+                  Opslaan
+                </Button>
+              )}
             </div>
           </DialogFooter>
         </form>

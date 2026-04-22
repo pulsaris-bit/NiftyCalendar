@@ -29,6 +29,7 @@ import { CalendarEvent, CalendarCategory, CalendarView } from '@/src/types';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { motion } from 'motion/react';
+import { toast } from 'sonner';
 import { 
   DndContext, 
   useDraggable, 
@@ -239,6 +240,12 @@ export function CalendarGrid({
     const targetDate = over.data.current?.date as Date;
 
     if (!draggedEvent || !targetDate) return;
+
+    const category = categories.find(c => c.id === draggedEvent.calendarId);
+    if (category && category.canEdit === false) {
+      toast.error("Je hebt geen rechten om afspraken in deze agenda te wijzigen.");
+      return;
+    }
 
     const droppableRect = over.rect;
     const activeRect = active.rect.current.translated;

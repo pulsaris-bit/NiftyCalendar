@@ -22,4 +22,6 @@ export interface CalendarCategory {
   name: string;
   color: string;
   isVisible: boolean;
+  isOwner?: boolean;
+  canEdit?: boolean;
 }

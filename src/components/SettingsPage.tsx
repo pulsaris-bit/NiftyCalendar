@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CalendarCategory, CalendarEvent } from '@/src/types';
-import { Plus, Trash2, Check, X, Palette, ChevronRight, Layout, Clock, Calendar as CalendarIcon, Upload } from 'lucide-react';
+import { Plus, Trash2, Check, X, Palette, ChevronRight, Layout, Clock, Calendar as CalendarIcon, Upload, Users, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { 
@@ -38,6 +38,7 @@ interface SettingsPageProps {
   onUpdateCategories: (categories: CalendarCategory[]) => void;
   onImportEvents: (events: CalendarEvent[]) => void;
   onClose: () => void;
+  token: string | null;
 }
 
 export function SettingsPage({ 
@@ -50,12 +51,81 @@ export function SettingsPage({
   onUpdateDefaultDuration,
   onUpdateCategories, 
   onImportEvents,
-  onClose 
+  onClose,
+  token
 }: SettingsPageProps) {
   const [localCategories, setLocalCategories] = React.useState<CalendarCategory[]>(categories);
   const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [sharingId, setSharingId] = React.useState<string | null>(null);
+  const [shares, setShares] = React.useState<any[]>([]);
+  const [shareUsername, setShareUsername] = React.useState("");
+  const [shareCanEdit, setShareCanEdit] = React.useState(false);
+  const [isSharingLoading, setIsSharingLoading] = React.useState(false);
   const [importTargetCalendarId, setImportTargetCalendarId] = React.useState<string>(defaultCalendarId);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (sharingId && token) {
+      fetchShares(sharingId);
+    }
+  }, [sharingId]);
+
+  const fetchShares = async (id: string) => {
+    try {
+      const res = await fetch(`/api/categories/${id}/shares`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setShares(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch shares", err);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!sharingId || !shareUsername || !token) return;
+    setIsSharingLoading(true);
+    try {
+      const res = await fetch(`/api/categories/${sharingId}/share`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ username: shareUsername, canEdit: shareCanEdit })
+      });
+      if (res.ok) {
+        toast.success(`Gedeeld met ${shareUsername}`);
+        setShareUsername("");
+        fetchShares(sharingId);
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Delen mislukt");
+      }
+    } catch (err) {
+      toast.error("Fout bij delen");
+    } finally {
+      setIsSharingLoading(false);
+    }
+  };
+
+  const handleUnshare = async (userId: number) => {
+    if (!sharingId || !token) return;
+    try {
+      const res = await fetch(`/api/categories/${sharingId}/share/${userId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        toast.success("Toegang ingetrokken");
+        fetchShares(sharingId);
+      }
+    } catch (err) {
+      toast.error("Fout bij intrekken");
+    }
+  };
 
   const colors = [
     '#C36322', // Nifty Orange
@@ -243,13 +313,91 @@ export function SettingsPage({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
+                      {cat.isOwner && (
+                        <Popover open={sharingId === cat.id} onOpenChange={(open) => !open && setSharingId(null)}>
+                          <PopoverTrigger asChild>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => setSharingId(cat.id)}
+                              className="h-9 w-9 text-slate-400 hover:text-[#C36322] hover:bg-orange-50 transition-all shrink-0"
+                            >
+                              <Users className="h-4 w-4" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent align="end" className="w-[300px] p-4 shadow-xl border-slate-200">
+                             <h4 className="text-xs font-bold uppercase tracking-widest text-slate-800 mb-4 flex items-center gap-2">
+                               <Users className="w-3 h-3 text-[#C36322]" />
+                               Agenda Delen: {cat.name}
+                             </h4>
+                             
+                             <div className="space-y-4">
+                               <div className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                 <Label className="text-[10px] font-bold text-slate-400 uppercase">Nieuwe gebruiker uitnodigen</Label>
+                                 <div className="flex gap-2">
+                                   <Input 
+                                     placeholder="Gebruikersnaam" 
+                                     value={shareUsername}
+                                     onChange={(e) => setShareUsername(e.target.value)}
+                                     className="h-8 text-xs bg-white"
+                                   />
+                                   <Button 
+                                     size="sm" 
+                                     onClick={handleShare}
+                                     disabled={isSharingLoading || !shareUsername}
+                                     className="h-8 px-2 bg-[#C36322] hover:bg-[#a6541d]"
+                                   >
+                                     <UserPlus className="w-4 h-4" />
+                                   </Button>
+                                 </div>
+                                 <div className="flex items-center gap-2 mt-1">
+                                    <Checkbox 
+                                      id="can-edit" 
+                                      checked={shareCanEdit} 
+                                      onCheckedChange={(checked) => setShareCanEdit(!!checked)}
+                                      className="w-3 h-3 rounded text-[#C36322]"
+                                    />
+                                    <Label htmlFor="can-edit" className="text-[10px] text-slate-500 cursor-pointer">Mag afspraken wijzigen</Label>
+                                 </div>
+                               </div>
+
+                               <div className="space-y-2">
+                                 <Label className="text-[10px] font-bold text-slate-400 uppercase px-1">Toegang verleend aan:</Label>
+                                 {shares.length === 0 ? (
+                                   <p className="text-[10px] text-slate-400 italic px-1">Nog niet gedeeld met anderen.</p>
+                                 ) : (
+                                   <div className="max-h-[150px] overflow-auto pr-1 flex flex-col gap-2">
+                                     {shares.map(s => (
+                                       <div key={s.userId} className="flex items-center justify-between bg-white p-2 rounded-md border border-slate-100 shadow-sm">
+                                         <div className="min-w-0">
+                                            <p className="text-[10px] font-bold text-slate-700 truncate">{s.username}</p>
+                                            <p className="text-[9px] text-slate-400">{s.canEdit ? 'Kan bewerken' : 'Alleen lezen'}</p>
+                                         </div>
+                                         <Button 
+                                           variant="ghost" 
+                                           size="icon" 
+                                           onClick={() => handleUnshare(s.userId)}
+                                           className="h-6 w-6 text-slate-300 hover:text-red-500"
+                                         >
+                                           <X className="h-3 w-3" />
+                                         </Button>
+                                       </div>
+                                     ))}
+                                   </div>
+                                 )}
+                               </div>
+                             </div>
+                          </PopoverContent>
+                        </Popover>
+                      )}
+
                       <Button 
                         variant="ghost" 
                         size="icon" 
                         onClick={() => handleDeleteCategory(cat.id)}
                         className="h-9 w-9 text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all shrink-0"
-                        disabled={localCategories.length <= 1}
+                        disabled={localCategories.length <= 1 || !cat.isOwner}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -296,14 +444,16 @@ export function SettingsPage({
                 </div>
                 <Select value={defaultCalendarId} onValueChange={onUpdateDefaultCalendarId}>
                   <SelectTrigger className="w-full sm:w-48 bg-white font-bold text-slate-700 border-slate-200 h-10">
-                    <SelectValue placeholder="Kies agenda" />
+                    <SelectValue placeholder="Kies agenda">
+                      {localCategories.find(c => c.id === defaultCalendarId)?.name || 'Kies agenda'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {categories.map(cat => (
+                    {localCategories.map(cat => (
                       <SelectItem key={cat.id} value={cat.id}>
                         <div className="flex items-center gap-2">
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
-                          {cat.name}
+                          <span className="truncate">{cat.name}</span>
                         </div>
                       </SelectItem>
                     ))}
@@ -358,14 +508,16 @@ export function SettingsPage({
                     <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Importeren in agenda:</Label>
                     <Select value={importTargetCalendarId} onValueChange={setImportTargetCalendarId}>
                       <SelectTrigger className="w-full bg-white font-bold text-slate-700 border-slate-200 h-10 shadow-sm">
-                        <SelectValue placeholder="Kies agenda" />
+                        <SelectValue placeholder="Kies agenda">
+                          {localCategories.find(c => c.id === importTargetCalendarId)?.name || 'Kies agenda'}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {localCategories.map(cat => (
                           <SelectItem key={cat.id} value={cat.id}>
                             <div className="flex items-center gap-2">
                               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
-                              {cat.name}
+                              <span className="truncate">{cat.name}</span>
                             </div>
                           </SelectItem>
                         ))}
