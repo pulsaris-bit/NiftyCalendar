@@ -128,7 +128,7 @@ app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
       if (!user) return res.status(404).json({ error: "User not found" });
       return res.json({ id: user.id, email: user.email, name: user.name, settings: user.settings });
     }
-    const result = await pool.query("SELECT id, email, name, settings FROM users WHERE id = $1", [req.user.id]);
+    const result = await pool.query("SELECT id, email, name, settings FROM users WHERE id = $1::integer", [req.user.id]);
     res.json(result.rows[0]);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -164,12 +164,13 @@ app.post("/api/auth/register", async (req, res) => {
     const userId = result.rows[0].id;
     await pool.query(`
       INSERT INTO categories (id, user_id, name, color, is_visible) VALUES 
-      ('personal-' || $1::text, $1, 'Persoonlijk', '#3b82f6', true),
-      ('work-' || $1::text, $1, 'Werk', '#22c55e', true)
-    `, [userId]);
+      ($1, $2::integer, 'Persoonlijk', '#3b82f6', true),
+      ($3, $2::integer, 'Werk', '#22c55e', true)
+    `, [`personal-${userId}`, userId, `work-${userId}`]);
 
-    const token = jwt.sign({ id: userId, email, name }, JWT_SECRET);
-    res.json({ user: result.rows[0], token });
+    const storeId = Number(userId);
+    const token = jwt.sign({ id: storeId, email, name }, JWT_SECRET);
+    res.json({ user: { id: storeId, email, name }, token });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -184,8 +185,8 @@ app.post("/api/auth/login", async (req, res) => {
       const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) return res.status(401).json({ error: "Ongeldig wachtwoord" });
 
-      const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET);
-      return res.json({ user: { id: user.id, email: user.email, name: user.name, settings: user.settings }, token });
+      const token = jwt.sign({ id: Number(user.id), email: user.email, name: user.name }, JWT_SECRET);
+      return res.json({ user: { id: Number(user.id), email: user.email, name: user.name, settings: user.settings }, token });
     }
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
     if (result.rows.length === 0) return res.status(401).json({ error: "Gebruiker niet gevonden" });
@@ -194,8 +195,8 @@ app.post("/api/auth/login", async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: "Ongeldig wachtwoord" });
 
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET);
-    res.json({ user: { id: user.id, email: user.email, name: user.name, settings: user.settings }, token });
+    const token = jwt.sign({ id: Number(user.id), email: user.email, name: user.name }, JWT_SECRET);
+    res.json({ user: { id: Number(user.id), email: user.email, name: user.name, settings: user.settings }, token });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -207,7 +208,7 @@ app.get("/api/user/settings", authenticateToken, async (req: any, res) => {
       const user = mockDb.users.find(u => u.id === req.user.id);
       return res.json(user?.settings || {});
     }
-    const result = await pool.query("SELECT settings FROM users WHERE id = $1", [req.user.id]);
+    const result = await pool.query("SELECT settings FROM users WHERE id = $1::integer", [req.user.id]);
     res.json(result.rows[0].settings);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -222,7 +223,7 @@ app.put("/api/user/settings", authenticateToken, async (req: any, res) => {
       return res.json(req.body);
     }
     const result = await pool.query(
-      "UPDATE users SET settings = $1 WHERE id = $2 RETURNING settings",
+      "UPDATE users SET settings = $1 WHERE id = $2::integer RETURNING settings",
       [req.body, req.user.id]
     );
     res.json(result.rows[0].settings);
@@ -254,11 +255,11 @@ app.get("/api/categories", authenticateToken, async (req: any, res) => {
     }
     const result = await pool.query(`
       SELECT c.*, 
-             (c.user_id = $1) as is_owner,
-             COALESCE(cs.can_edit, false) OR (c.user_id = $1) as can_edit
+             (c.user_id = $1::integer) as is_owner,
+             COALESCE(cs.can_edit, false) OR (c.user_id = $1::integer) as can_edit
       FROM categories c
-      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
-      WHERE c.user_id = $1 OR cs.user_id = $1
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1::integer
+      WHERE c.user_id = $1::integer OR cs.user_id = $1::integer
     `, [req.user.id]);
     res.json(result.rows.map(row => ({
       id: row.id,
@@ -284,7 +285,7 @@ app.get("/api/categories/:id/shares", authenticateToken, async (req: any, res) =
       });
       return res.json(shares);
     }
-    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2::integer", [req.params.id, req.user.id]);
     if (checkOwner.rows.length === 0) return res.status(403).json({ error: "Access denied" });
 
     const result = await pool.query(`
@@ -317,7 +318,7 @@ app.post("/api/categories/:id/share", authenticateToken, async (req: any, res) =
       }
       return res.json({ success: true });
     }
-    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2::integer", [req.params.id, req.user.id]);
     if (checkOwner.rows.length === 0) return res.status(403).json({ error: "Access denied" });
 
     const userRes = await pool.query("SELECT id FROM users WHERE name = $1", [username]);
@@ -327,7 +328,7 @@ app.post("/api/categories/:id/share", authenticateToken, async (req: any, res) =
 
     await pool.query(`
       INSERT INTO category_shares (category_id, user_id, can_edit)
-      VALUES ($1, $2, $3)
+      VALUES ($1, $2::integer, $3)
       ON CONFLICT (category_id, user_id) DO UPDATE SET can_edit = $3
     `, [req.params.id, targetUserId, canEdit]);
     res.json({ success: true });
@@ -344,10 +345,10 @@ app.delete("/api/categories/:id/share/:userId", authenticateToken, async (req: a
       mockDb.shares = mockDb.shares.filter(s => !(s.category_id === req.params.id && s.user_id === parseInt(req.params.userId)));
       return res.json({ success: true });
     }
-    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    const checkOwner = await pool.query("SELECT id FROM categories WHERE id = $1 AND user_id = $2::integer", [req.params.id, req.user.id]);
     if (checkOwner.rows.length === 0) return res.status(403).json({ error: "Access denied" });
 
-    await pool.query("DELETE FROM category_shares WHERE category_id = $1 AND user_id = $2", [req.params.id, req.params.userId]);
+    await pool.query("DELETE FROM category_shares WHERE category_id = $1 AND user_id = $2::integer", [req.params.id, req.params.userId]);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -366,7 +367,7 @@ app.put("/api/categories/:id", authenticateToken, async (req: any, res) => {
       return res.status(404).json({ error: "Category not found" });
     }
     const result = await pool.query(
-      "UPDATE categories SET name = $1, color = $2, is_visible = $3 WHERE id = $4 AND user_id = $5 RETURNING *",
+      "UPDATE categories SET name = $1, color = $2, is_visible = $3 WHERE id = $4 AND user_id = $5::integer RETURNING *",
       [name, color, isVisible, req.params.id, req.user.id]
     );
     res.json(result.rows[0]);
@@ -398,8 +399,8 @@ app.get("/api/events", authenticateToken, async (req: any, res) => {
       SELECT e.* 
       FROM events e
       JOIN categories c ON e.calendar_id = c.id
-      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
-      WHERE c.user_id = $1 OR cs.user_id = $1
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1::integer
+      WHERE c.user_id = $1::integer OR cs.user_id = $1::integer
     `, [req.user.id]);
     res.json(result.rows.map(row => ({
       id: row.id,
@@ -437,10 +438,10 @@ app.post("/api/events", authenticateToken, async (req: any, res) => {
     
     // Check permissions
     const permRes = await pool.query(`
-      SELECT c.user_id = $1 as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
+      SELECT (c.user_id = $1::integer) as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
       FROM categories c
-      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
-      WHERE c.id = $2 AND (c.user_id = $1 OR cs.user_id = $1)
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1::integer
+      WHERE c.id = $2 AND (c.user_id = $1::integer OR cs.user_id = $1::integer)
     `, [req.user.id, calendarId]);
 
     if (permRes.rows.length === 0 || (!permRes.rows[0].is_owner && !permRes.rows[0].is_shared_editor)) {
@@ -449,7 +450,7 @@ app.post("/api/events", authenticateToken, async (req: any, res) => {
 
     const result = await pool.query(
       `INSERT INTO events (id, user_id, title, start_time, end_time, description, location, calendar_id, color, is_all_day) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+       VALUES ($1, $2::integer, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
       [id, req.user.id, title, start, end, description, location, calendarId, color, isAllDay]
     );
     res.json(result.rows[0]);
@@ -482,11 +483,11 @@ app.put("/api/events/:id", authenticateToken, async (req: any, res) => {
 
     // Check permissions on the event/category
     const permRes = await pool.query(`
-      SELECT c.user_id = $1 as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
+      SELECT (c.user_id = $1::integer) as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
       FROM events e
       JOIN categories c ON e.calendar_id = c.id
-      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
-      WHERE e.id = $2 AND (c.user_id = $1 OR cs.user_id = $1)
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1::integer
+      WHERE e.id = $2 AND (c.user_id = $1::integer OR cs.user_id = $1::integer)
     `, [req.user.id, req.params.id]);
 
     if (permRes.rows.length === 0 || (!permRes.rows[0].is_owner && !permRes.rows[0].is_shared_editor)) {
@@ -521,11 +522,11 @@ app.delete("/api/events/:id", authenticateToken, async (req: any, res) => {
     }
 
     const permRes = await pool.query(`
-      SELECT c.user_id = $1 as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
+      SELECT (c.user_id = $1::integer) as is_owner, COALESCE(cs.can_edit, false) as is_shared_editor
       FROM events e
       JOIN categories c ON e.calendar_id = c.id
-      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1
-      WHERE e.id = $2 AND (c.user_id = $1 OR cs.user_id = $1)
+      LEFT JOIN category_shares cs ON c.id = cs.category_id AND cs.user_id = $1::integer
+      WHERE e.id = $2 AND (c.user_id = $1::integer OR cs.user_id = $1::integer)
     `, [req.user.id, req.params.id]);
 
     if (permRes.rows.length === 0 || (!permRes.rows[0].is_owner && !permRes.rows[0].is_shared_editor)) {
