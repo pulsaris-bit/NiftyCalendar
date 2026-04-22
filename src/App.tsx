@@ -205,6 +205,8 @@ export default function App() {
         body: JSON.stringify(finalEvent)
       });
 
+      const data = await res.json();
+
       if (res.ok) {
         if (isNew) {
           setEvents(prev => [...prev, finalEvent as CalendarEvent]);
@@ -215,10 +217,10 @@ export default function App() {
         }
         setIsDialogOpen(false);
       } else {
-        throw new Error("Opslaan mislukt");
+        throw new Error(data.error || "Opslaan mislukt");
       }
-    } catch (err) {
-      toast.error("Kon afspraak niet opslaan");
+    } catch (err: any) {
+      toast.error(err.message || "Kon afspraak niet opslaan");
     }
   };
 

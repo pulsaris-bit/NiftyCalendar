@@ -83,8 +83,8 @@ export function CalendarHeader({
         </Button>
 
         <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 bg-[#C36322] rounded-lg flex items-center justify-center text-white font-bold shadow-sm shrink-0">
-            N
+          <div className="w-8 h-8 bg-[#C36322] rounded-lg flex items-center justify-center text-white font-bold shadow-sm shrink-0 rotate-[5deg]">
+            <CalendarIcon className="h-5 w-5" />
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-semibold tracking-tight text-slate-700 hidden md:inline truncate leading-tight">
@@ -154,10 +154,8 @@ export function CalendarHeader({
         <div className="flex items-center gap-0 sm:gap-1 shrink-0 ml-auto">
           <div className="lg:hidden shrink-0">
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-gray-400 h-9 w-8 sm:w-9">
-                  <CalendarIcon className="h-5 w-5" />
-                </Button>
+              <DropdownMenuTrigger className="text-gray-400 h-9 w-8 sm:w-9 hover:bg-slate-100 rounded-md flex items-center justify-center transition-all outline-none">
+                <CalendarIcon className="h-5 w-5" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => onViewChange('day')} className={view === 'day' ? 'bg-slate-50 font-bold' : ''}>Dag</DropdownMenuItem>

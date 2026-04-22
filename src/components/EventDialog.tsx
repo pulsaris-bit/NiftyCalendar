@@ -111,10 +111,23 @@ export function EventDialog({
                     <Input 
                       type="date" 
                       className="h-9 text-sm w-full bg-white border-gray-200 focus-visible:ring-[#C36322]"
-                      value={formData.start ? format(formData.start, 'yyyy-MM-dd', { locale: nl }) : ''}
+                      value={formData.start ? format(formData.start, 'yyyy-MM-dd') : ''}
                       onChange={(e) => {
-                        const date = new Date(e.target.value);
-                        setFormData({ ...formData, start: date, end: new Date(date.getTime() + 60*60*1000) });
+                        const dateStr = e.target.value;
+                        if (!dateStr) return;
+                        const [year, month, day] = dateStr.split('-').map(Number);
+                        const newStart = new Date(formData.start || new Date());
+                        newStart.setFullYear(year, month - 1, day);
+                        
+                        const newEnd = new Date(formData.end || new Date());
+                        newEnd.setFullYear(year, month - 1, day);
+                        
+                        // Ensure duration is preserved or at least end is after start
+                        if (newEnd <= newStart) {
+                          newEnd.setTime(newStart.getTime() + 60 * 60 * 1000);
+                        }
+                        
+                        setFormData({ ...formData, start: newStart, end: newEnd });
                       }}
                       disabled={!canEdit}
                     />
@@ -132,8 +145,14 @@ export function EventDialog({
                             const [hours, minutes] = e.target.value.split(':');
                             if (formData.start) {
                               const date = new Date(formData.start);
-                              date.setHours(parseInt(hours), parseInt(minutes));
-                              setFormData({ ...formData, start: date });
+                              date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+                              
+                              let newEnd = formData.end ? new Date(formData.end) : new Date(date.getTime() + 60 * 60 * 1000);
+                              if (newEnd <= date) {
+                                newEnd = new Date(date.getTime() + 60 * 60 * 1000);
+                              }
+                              
+                              setFormData({ ...formData, start: date, end: newEnd });
                             }
                           }}
                           disabled={!canEdit}
@@ -149,7 +168,13 @@ export function EventDialog({
                             const [hours, minutes] = e.target.value.split(':');
                             if (formData.end) {
                               const date = new Date(formData.end);
-                              date.setHours(parseInt(hours), parseInt(minutes));
+                              date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+                              
+                              // If user sets end time before start time, assume it's the next day
+                              if (formData.start && date <= formData.start) {
+                                date.setDate(date.getDate() + 1);
+                              }
+                              
                               setFormData({ ...formData, end: date });
                             }
                           }}

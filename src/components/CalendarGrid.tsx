@@ -55,18 +55,20 @@ interface CalendarGridProps {
   highlightWeekends: boolean;
 }
 
+interface DraggableEventProps {
+  event: CalendarEvent;
+  children: React.ReactNode;
+  styles?: React.CSSProperties;
+  className?: string;
+  key?: React.Key;
+}
+
 function DraggableEvent({ 
   event, 
   children, 
   styles, 
   className 
-}: { 
-  event: CalendarEvent, 
-  children: React.ReactNode, 
-  styles?: React.CSSProperties, 
-  className?: string,
-  key?: string 
-}) {
+}: DraggableEventProps) {
   const {attributes, listeners, setNodeRef, transform, isDragging} = useDraggable({
     id: event.id,
     data: { event }
@@ -95,7 +97,16 @@ function DraggableEvent({
   );
 }
 
-function DroppableColumn({ id, children, date, className, onClick, key }: { id: string, children: React.ReactNode, date: Date, className?: string, onClick?: () => void, key?: string }) {
+interface DroppableColumnProps {
+  id: string;
+  children: React.ReactNode;
+  date: Date;
+  className?: string;
+  onClick?: () => void;
+  key?: React.Key;
+}
+
+function DroppableColumn({ id, children, date, className, onClick }: DroppableColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id,
     data: { date }
@@ -516,8 +527,8 @@ export function CalendarGrid({
     };
 
     return (
-      <div className="flex-1 flex flex-col min-h-0 bg-white lg:overflow-hidden h-full">
-        <div className="bg-white border-b border-gray-100 py-2 flex items-center justify-center gap-4 lg:min-w-[850px] lg:pl-[64px] shadow-sm z-20">
+      <div className="flex-1 flex flex-col h-full min-h-0 bg-white lg:overflow-hidden">
+        <div className="bg-white border-b border-gray-100 py-2 flex items-center justify-center gap-4 lg:min-w-[850px] lg:pl-[64px] shadow-sm z-20 shrink-0">
           <span className="text-[10px] font-black text-[#C36322] uppercase tracking-[0.2em] bg-orange-50 px-3 py-1 rounded-full border border-orange-100">
             Week {format(startDate, 'w', { locale: nl })}
           </span>
@@ -525,27 +536,59 @@ export function CalendarGrid({
         
         {/* Desktop Grid */}
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <div className="hidden lg:flex flex-col flex-1 min-h-0 min-w-[900px] h-full">
-            {/* Header row */}
-            <div className="flex bg-white border-b border-gray-100 pr-4 shrink-0">
-               <div className="w-[64px] shrink-0 border-r border-gray-100" />
-               <div className="flex-1 grid grid-cols-7 divide-x divide-gray-50 uppercase text-[10px] font-bold text-gray-400">
-                  {days.map(day => (
-                    <div key={day.toString()} className="py-3 flex flex-col items-center gap-1">
-                       <span>{format(day, 'EEE', { locale: nl })}</span>
-                       <span className={cn(
-                         "text-lg w-8 h-8 flex items-center justify-center rounded-full transition-colors",
-                         isToday(day) ? "bg-[#C36322] text-white shadow-sm" : "text-slate-700"
-                       )}>
-                         {format(day, 'd')}
-                       </span>
-                    </div>
-                  ))}
+          <div className="hidden lg:flex flex-col flex-1 h-full min-h-0 min-w-[900px]">
+            {/* Header row + All Day Section */}
+            <div className="flex flex-col bg-white border-b border-gray-100 pr-4 shrink-0 shadow-sm z-30">
+               {/* Day labels */}
+               <div className="flex">
+                  <div className="w-[64px] shrink-0 border-r border-gray-100" />
+                  <div className="flex-1 grid grid-cols-7 divide-x divide-gray-50 uppercase text-[10px] font-bold text-gray-400">
+                     {days.map(day => (
+                       <div key={day.toString()} className="py-3 flex flex-col items-center gap-1">
+                          <span>{format(day, 'EEE', { locale: nl })}</span>
+                          <span className={cn(
+                            "text-lg w-8 h-8 flex items-center justify-center rounded-full transition-colors",
+                            isToday(day) ? "bg-[#C36322] text-white shadow-sm" : "text-slate-700"
+                          )}>
+                            {format(day, 'd')}
+                          </span>
+                       </div>
+                     ))}
+                  </div>
+               </div>
+
+               {/* All day events row */}
+               <div className="flex border-t border-gray-50 min-h-[40px]">
+                  <div className="w-[64px] shrink-0 border-r border-gray-100 flex items-center justify-center">
+                    <span className="text-[10px] font-extrabold text-gray-300 uppercase [writing-mode:vertical-rl] rotate-180">Hele dag</span>
+                  </div>
+                  <div className="flex-1 grid grid-cols-7 divide-x divide-gray-100">
+                     {days.map(day => {
+                        const dayEvents = getFilteredEvents().filter(e => isSameDay(e.start, day) && e.isAllDay);
+                        return (
+                          <div key={day.toString()} className="p-1 flex flex-col gap-1 min-h-[40px]">
+                             {dayEvents.map(event => {
+                                const category = categories.find(c => c.id === event.calendarId);
+                                return (
+                                  <div 
+                                    key={event.id}
+                                    onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
+                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-100 border-l-2 border-[#C36322] text-[#C36322] truncate cursor-pointer hover:brightness-95 transition-all"
+                                  >
+                                     {event.title}
+                                  </div>
+                                );
+                             })}
+                          </div>
+                        );
+                     })}
+                  </div>
                </div>
             </div>
 
-            <ScrollArea ref={scrollAreaRef} className="flex-1 bg-white h-full w-full">
-              <div className="flex h-[1440px] relative"> {/* 24 * 60px */}
+            <div className="flex-1 relative min-h-0 h-full">
+              <div ref={scrollAreaRef as any} className="absolute inset-0 bg-white w-full h-full overflow-y-auto scroll-smooth">
+                <div className="flex h-[1440px] relative"> {/* 24 * 60px */}
                 {/* Hours Column */}
                 <div className="w-[64px] shrink-0 bg-gray-50/50 border-r border-gray-100 flex flex-col divide-y divide-gray-100/50">
                   {hours.map(hour => (
@@ -569,7 +612,6 @@ export function CalendarGrid({
                    {/* Day Columns */}
                    {days.map(day => {
                       const dayEvents = getFilteredEvents().filter(e => isSameDay(e.start, day));
-                      const allDayEvents = dayEvents.filter(e => e.isAllDay);
                       const timedEvents = dayEvents.filter(e => !e.isAllDay);
 
                       return (
@@ -586,22 +628,6 @@ export function CalendarGrid({
                         >
                            {/* Now Indicator for today */}
                            {isToday(day) && <NowIndicator />}
-
-                           {/* All Day Section (Simplified for now - at top) */}
-                           <div className="flex flex-col gap-0.5 p-0.5 min-h-[4px]">
-                              {allDayEvents.map(event => {
-                                 const category = categories.find(c => c.id === event.calendarId);
-                                 return (
-                                   <div 
-                                     key={event.id}
-                                     onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
-                                     className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-100 border-l-2 border-[#C36322] text-[#C36322] truncate cursor-pointer"
-                                   >
-                                      {event.title}
-                                   </div>
-                                 );
-                              })}
-                           </div>
 
                            {/* Timed Events Container */}
                            <div className="relative flex-1 h-full">
@@ -636,7 +662,8 @@ export function CalendarGrid({
                    })}
                 </div>
               </div>
-            </ScrollArea>
+            </div>
+           </div>
           </div>
         </DndContext>
 
@@ -717,7 +744,7 @@ export function CalendarGrid({
     };
 
     return (
-      <div className="flex-1 flex flex-col bg-white overflow-hidden h-full">
+      <div className="flex-1 flex flex-col h-full bg-white overflow-hidden">
         <div className="lg:hidden flex flex-col items-center shrink-0 border-b border-gray-100 p-3 bg-slate-50/50">
           <div className="text-[10px] font-bold text-[#C36322] uppercase tracking-[0.2em] mb-0.5">{format(currentDate, 'EEEE', { locale: nl })}</div>
           <div className="flex items-center gap-3">
@@ -727,7 +754,7 @@ export function CalendarGrid({
         </div>
 
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <div className="flex-1 flex min-h-0 h-full">
+          <div className="flex-1 flex h-full min-h-0">
             {/* Legend - Desktop only for side details */}
             <div className="hidden lg:flex w-64 flex-col items-center shrink-0 border-r border-gray-100 p-8 bg-slate-50/50">
                <div className="text-xs font-bold text-[#C36322] uppercase tracking-[0.2em] mb-2">{format(currentDate, 'EEEE', { locale: nl })}</div>
@@ -758,8 +785,9 @@ export function CalendarGrid({
                 </div>
               )}
 
-              <ScrollArea ref={scrollAreaRef} className="flex-1 bg-white h-full w-full scrollbar-hide">
-                <div className="max-w-5xl mx-auto flex h-[1440px] relative p-6">
+              <div className="flex-1 relative min-h-0 h-full">
+                <div ref={scrollAreaRef as any} className="absolute inset-0 bg-white w-full overflow-x-hidden overflow-y-auto scroll-smooth">
+                  <div className="max-w-5xl mx-auto flex h-[1440px] relative p-6">
                   {/* Hours Label Column */}
                   <div className="hidden sm:flex w-[60px] shrink-0 flex-col">
                     {hours.map(hour => (
@@ -834,7 +862,8 @@ export function CalendarGrid({
                     })}
                   </DroppableColumn>
                 </div>
-              </ScrollArea>
+              </div>
+             </div>
             </div>
           </div>
         </DndContext>

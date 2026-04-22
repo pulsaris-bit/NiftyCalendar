@@ -77,8 +77,8 @@ export function AuthPage({ onLogin }: AuthPageProps) {
         className="w-full max-w-[420px] z-10"
       >
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-[#C36322] rounded-2xl flex items-center justify-center text-white text-3xl font-black shadow-2xl shadow-[#C36322]/20 mb-4 rotate-3">
-            N
+          <div className="w-16 h-16 bg-[#C36322] rounded-2xl flex items-center justify-center text-white text-3xl font-black shadow-2xl shadow-[#C36322]/20 mb-4 rotate-[5deg]">
+            <Calendar className="w-10 h-10" />
           </div>
           <h1 className="text-3xl font-black tracking-tighter text-white">NiftyCalendar</h1>
         </div>
