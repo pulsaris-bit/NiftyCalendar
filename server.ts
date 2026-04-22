@@ -362,13 +362,13 @@ app.delete("/api/events/:id", authenticateToken, async (req: any, res) => {
 });
 
 async function startServer() {
-  await initDb();
-
   const isProduction = process.env.NODE_ENV === "production";
   const distPath = path.join(process.cwd(), 'dist');
   
-  // In AI Studio environment, we often want to fallback to Vite even if NODE_ENV is production
-  // especially if the dist folder hasn't been built yet.
+  // Initialize DB in background - DO NOT AWAIT
+  initDb().catch(err => console.error("Background DB init failed:", err));
+
+  // Setup middleware BEFORE listening
   if (!isProduction || !fs.existsSync(path.join(distPath, 'index.html'))) {
     console.log("Using Vite middleware for development/fallback...");
     const vite = await createViteServer({
@@ -384,8 +384,10 @@ async function startServer() {
     });
   }
 
+  // Final step: listen
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Environment: ${isProduction ? 'production' : 'development'}`);
   });
 }
 
