@@ -4,19 +4,29 @@
  */
 
 import { CalendarEvent } from '../types';
+import { toast } from 'sonner';
 
 class NotificationService {
   private notifiedEventIds: Set<string> = new Set();
 
+  private get isSupported(): boolean {
+    return typeof window !== 'undefined' && 'Notification' in window;
+  }
+
   private get hasPermission(): boolean {
-    return typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
+    return this.isSupported && Notification.permission === 'granted';
   }
 
   constructor() {}
 
   async requestPermission(): Promise<boolean> {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      console.warn("Browser ondersteunt geen notificaties.");
+    if (!this.isSupported) {
+      toast.error("Browser ondersteunt geen notificaties.");
+      return false;
+    }
+
+    if (!window.isSecureContext) {
+      toast.error("Notificaties vereisen een veilige HTTPS verbinding.");
       return false;
     }
 
@@ -24,22 +34,50 @@ class NotificationService {
       return true;
     }
 
+    if (Notification.permission === 'denied') {
+      toast.error("Meldingen zijn geblokkeerd in je browserinstellingen.");
+      return false;
+    }
+
     try {
       const permission = await Notification.requestPermission();
-      return permission === 'granted';
+      if (permission === 'granted') {
+        toast.success("Notificaties ingeschakeld!");
+        return true;
+      }
+      toast.error("Permissie geweigerd.");
+      return false;
     } catch (err) {
       console.error("Fout bij aanvragen notificatiepermissie:", err);
+      toast.error("Fout bij aanvragen permissie.");
       return false;
     }
   }
 
   sendTestNotification() {
+    if (!window.isSecureContext) {
+      toast.error("Onveilige verbinding: HTTPS is vereist voor meldingen.");
+      return;
+    }
+
+    if (!this.isSupported) {
+      toast.error("Browser ondersteunt geen meldingen.");
+      return;
+    }
+
     if (!this.hasPermission) {
+      toast.info("Vraag eerst permissie aan...");
       this.requestPermission().then(granted => {
-        if (granted) this.executeNotification("Test Melding", "Hoera! Notificaties werken correct.");
+        if (granted) {
+          setTimeout(() => {
+            this.executeNotification("Test Melding", "Notificaties werken!");
+            toast.success("Testmelding verzonden.");
+          }, 500);
+        }
       });
     } else {
-      this.executeNotification("Test Melding", "Hoera! Notificaties werken correct.");
+      this.executeNotification("Test Melding", "Notificaties werken!");
+      toast.success("Testmelding verzonden.");
     }
   }
 
