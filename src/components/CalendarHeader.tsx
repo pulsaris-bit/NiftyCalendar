@@ -19,6 +19,8 @@ import { CalendarView } from '@/src/types';
 import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfWeek, endOfWeek, isSameMonth } from 'date-fns';
 import { nl } from 'date-fns/locale';
 import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
+import { notificationService } from '@/src/lib/notificationService';
 
 import { 
   DropdownMenu,
@@ -166,7 +168,19 @@ export function CalendarHeader({
             </DropdownMenu>
           </div>
           
-          <Button variant="ghost" size="icon" className="text-gray-400 h-9 w-9 hidden sm:flex shrink-0">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-gray-400 h-9 w-9 hidden sm:flex shrink-0"
+            onClick={async () => {
+              const granted = await notificationService.requestPermission();
+              if (granted) {
+                toast.success("Bureaubladmeldingen ingeschakeld");
+              } else {
+                toast.error("Meldingen zijn geweigerd door de browser");
+              }
+            }}
+          >
             <Bell className="h-5 w-5" />
           </Button>
           <Button variant="ghost" size="icon" className="text-gray-400 h-9 w-9 hidden sm:flex shrink-0" onClick={onSettings}>

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CalendarCategory, CalendarEvent } from '@/src/types';
-import { Plus, Trash2, Check, X, Palette, ChevronRight, Layout, Clock, Calendar as CalendarIcon, Upload, Users, UserPlus } from 'lucide-react';
+import { Plus, Trash2, Check, X, Palette, ChevronRight, Layout, Clock, Calendar as CalendarIcon, Upload, Users, UserPlus, Bell } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { 
@@ -35,6 +35,8 @@ interface SettingsPageProps {
   onUpdateDefaultCalendarId: (id: string) => void;
   defaultDuration: number;
   onUpdateDefaultDuration: (duration: number) => void;
+  notificationThreshold: number;
+  onUpdateNotificationThreshold: (threshold: number) => void;
   onUpdateCategories: (categories: CalendarCategory[]) => void;
   onImportEvents: (events: CalendarEvent[]) => void;
   onClose: () => void;
@@ -49,6 +51,8 @@ export function SettingsPage({
   onUpdateDefaultCalendarId,
   defaultDuration,
   onUpdateDefaultDuration,
+  notificationThreshold,
+  onUpdateNotificationThreshold,
   onUpdateCategories, 
   onImportEvents,
   onClose,
@@ -482,6 +486,32 @@ export function SettingsPage({
                     <SelectItem value="60">1 uur</SelectItem>
                     <SelectItem value="90">1,5 uur</SelectItem>
                     <SelectItem value="120">2 uur</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-[#C36322] border-2 border-[#C36322]">
+                    <Bell className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <Label className="text-sm font-bold text-slate-700">Notificatie Herinnering</Label>
+                    <p className="text-xs text-slate-500 font-medium">Hoeveel minuten van tevoren wil je een melding ontvangen?</p>
+                  </div>
+                </div>
+                <Select value={notificationThreshold.toString()} onValueChange={(val) => onUpdateNotificationThreshold(parseInt(val, 10))}>
+                  <SelectTrigger className="w-full sm:w-48 bg-white font-bold text-slate-700 border-slate-200 h-10">
+                    <SelectValue placeholder="Kies tijd" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Op het moment zelf</SelectItem>
+                    <SelectItem value="1">1 minuut van tevoren</SelectItem>
+                    <SelectItem value="2">2 minuten van tevoren</SelectItem>
+                    <SelectItem value="5">5 minuten van tevoren</SelectItem>
+                    <SelectItem value="10">10 minuten van tevoren</SelectItem>
+                    <SelectItem value="15">15 minuten van tevoren</SelectItem>
+                    <SelectItem value="30">30 minuten van tevoren</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

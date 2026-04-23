@@ -15,6 +15,7 @@ import { INITIAL_EVENTS, INITIAL_CATEGORIES } from './constants';
 import { Toaster, toast } from 'sonner';
 import { startOfToday } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { notificationService } from './lib/notificationService';
 
 export default function App() {
   const [user, setUser] = React.useState<{ email: string; name: string } | null>(null);
@@ -29,9 +30,25 @@ export default function App() {
   const [highlightWeekends, setHighlightWeekends] = React.useState(false);
   const [defaultCalendarId, setDefaultCalendarId] = React.useState<string>('');
   const [defaultDuration, setDefaultDuration] = React.useState<number>(60);
+  const [notificationThreshold, setNotificationThreshold] = React.useState<number>(5);
   const [selectedEvent, setSelectedEvent] = React.useState<Partial<CalendarEvent> | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isMockMode, setIsMockMode] = React.useState(false);
+
+  // Notification timer
+  React.useEffect(() => {
+    if (!token || events.length === 0) return;
+
+    // Check immediately on data load
+    notificationService.checkUpcomingEvents(events, notificationThreshold);
+
+    // Then check every minute
+    const interval = setInterval(() => {
+      notificationService.checkUpcomingEvents(events, notificationThreshold);
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [events, token, notificationThreshold]);
 
   React.useEffect(() => {
     checkStatus();
@@ -89,6 +106,7 @@ export default function App() {
         if (settingsData.highlightWeekends !== undefined) setHighlightWeekends(settingsData.highlightWeekends);
         if (settingsData.defaultCalendarId) setDefaultCalendarId(settingsData.defaultCalendarId);
         if (settingsData.defaultDuration) setDefaultDuration(settingsData.defaultDuration);
+        if (settingsData.notificationThreshold !== undefined) setNotificationThreshold(settingsData.notificationThreshold);
         
         // If no default calendar set but categories exist, set one
         if (!settingsData.defaultCalendarId && catsData.length > 0) {
@@ -366,17 +384,22 @@ export default function App() {
               highlightWeekends={highlightWeekends}
               onUpdateHighlightWeekends={(val) => {
                 setHighlightWeekends(val);
-                updateSettings({ highlightWeekends: val, defaultCalendarId, defaultDuration });
+                updateSettings({ highlightWeekends: val, defaultCalendarId, defaultDuration, notificationThreshold });
               }}
               defaultCalendarId={defaultCalendarId}
               onUpdateDefaultCalendarId={(id) => {
                 setDefaultCalendarId(id);
-                updateSettings({ highlightWeekends, defaultCalendarId: id, defaultDuration });
+                updateSettings({ highlightWeekends, defaultCalendarId: id, defaultDuration, notificationThreshold });
               }}
               defaultDuration={defaultDuration}
               onUpdateDefaultDuration={(dur) => {
                 setDefaultDuration(dur);
-                updateSettings({ highlightWeekends, defaultCalendarId, defaultDuration: dur });
+                updateSettings({ highlightWeekends, defaultCalendarId, defaultDuration: dur, notificationThreshold });
+              }}
+              notificationThreshold={notificationThreshold}
+              onUpdateNotificationThreshold={(threshold) => {
+                setNotificationThreshold(threshold);
+                updateSettings({ highlightWeekends, defaultCalendarId, defaultDuration, notificationThreshold: threshold });
               }}
               onUpdateCategories={(newCats) => {
                 setCategories(newCats);
