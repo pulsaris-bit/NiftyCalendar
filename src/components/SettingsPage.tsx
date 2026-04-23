@@ -26,6 +26,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import ICAL from 'ical.js';
 import { toast } from 'sonner';
+import { notificationService } from '@/src/lib/notificationService';
 
 interface SettingsPageProps {
   categories: CalendarCategory[];
@@ -500,7 +501,16 @@ export function SettingsPage({
                     <p className="text-xs text-slate-500 font-medium">Hoeveel minuten van tevoren wil je een melding ontvangen?</p>
                   </div>
                 </div>
-                <Select value={notificationThreshold.toString()} onValueChange={(val) => onUpdateNotificationThreshold(parseInt(val, 10))}>
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => notificationService.sendTestNotification()}
+                    className="w-full sm:w-auto h-10 border-slate-200 text-slate-600 font-bold text-[10px] uppercase tracking-widest px-4 hover:bg-white"
+                  >
+                    Test nu
+                  </Button>
+                  <Select value={notificationThreshold.toString()} onValueChange={(val) => onUpdateNotificationThreshold(parseInt(val, 10))}>
                   <SelectTrigger className="w-full sm:w-48 bg-white font-bold text-slate-700 border-slate-200 h-10">
                     <SelectValue placeholder="Kies tijd" />
                   </SelectTrigger>
@@ -514,6 +524,7 @@ export function SettingsPage({
                     <SelectItem value="30">30 minuten van tevoren</SelectItem>
                   </SelectContent>
                 </Select>
+                </div>
               </div>
             </div>
           </section>
