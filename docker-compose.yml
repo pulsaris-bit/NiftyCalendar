@@ -6,3 +6,5 @@ services:
     restart: always
     environment:
       - JWT_SECRET=${JWT_SECRET:-default-secret-key-123}
+    volumes:
+      - ./data:/app/data

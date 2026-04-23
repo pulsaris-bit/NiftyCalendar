@@ -14,7 +14,11 @@ const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "default-secret-key-123";
 
 // Database initialization
-const dbPath = path.join(process.cwd(), "calendar.db");
+const dataDir = path.join(process.cwd(), "data");
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+const dbPath = path.join(dataDir, "calendar.db");
 const db = new Database(dbPath);
 
 // Create tables
