@@ -12,10 +12,11 @@ import {
   Settings, 
   HelpCircle,
   Calendar as CalendarIcon,
-  Bell
+  Bell,
+  RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { CalendarView } from '@/src/types';
+import { CalendarView } from '../types';
 import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfWeek, endOfWeek, isSameMonth } from 'date-fns';
 import { nl } from 'date-fns/locale';
 import { Input } from '@/components/ui/input';
@@ -36,10 +37,13 @@ interface CalendarHeaderProps {
   onViewChange: (view: CalendarView) => void;
   onToday: () => void;
   onToggleSidebar: () => void;
-  user: { name: string; email: string } | null;
+  user: { name: string; email: string; authMethod?: 'oauth' | 'basic' } | null;
   onLogout: () => void;
   onSettings: () => void;
   isMockMode?: boolean;
+  isSyncing?: boolean;
+  onSync?: () => void;
+  caldavConfigured?: boolean;
 }
 
 export function CalendarHeader({
@@ -52,7 +56,10 @@ export function CalendarHeader({
   user,
   onLogout,
   onSettings,
-  isMockMode = false
+  isMockMode = false,
+  isSyncing = false,
+  onSync,
+  caldavConfigured = false
 }: CalendarHeaderProps) {
   const handlePrev = () => {
     if (view === 'month' || view === 'agenda') onNavigate(subMonths(currentDate, 1));
@@ -94,6 +101,9 @@ export function CalendarHeader({
             </span>
             {isMockMode && (
               <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded font-bold w-fit leading-none py-0.5 ml-0 md:ml-0.5">MOCK</span>
+            )}
+            {caldavConfigured && (
+              <span className="text-[8px] bg-green-100 text-green-700 px-1 rounded font-bold w-fit leading-none py-0.5 ml-0 md:ml-0.5">CalDAV</span>
             )}
           </div>
         </div>
@@ -154,6 +164,19 @@ export function CalendarHeader({
         </div>
 
         <div className="flex items-center gap-0 sm:gap-1 shrink-0 ml-auto">
+          {/* CalDAV Sync Button - show if configured and user is logged in */}
+          {caldavConfigured && user && onSync && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-gray-400 h-9 w-9 hidden sm:flex shrink-0"
+              onClick={onSync}
+              disabled={isSyncing}
+            >
+              <RefreshCw className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
+            </Button>
+          )}
+
           <div className="lg:hidden shrink-0">
             <DropdownMenu>
               <DropdownMenuTrigger className="text-gray-400 h-9 w-8 sm:w-9 hover:bg-slate-100 rounded-md flex items-center justify-center transition-all outline-none">
@@ -195,6 +218,11 @@ export function CalendarHeader({
               <div className="px-2 py-2 mb-2">
                 <p className="text-sm font-bold text-slate-800">{user?.name}</p>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{user?.email}</p>
+                {user?.authMethod && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Auth: {user.authMethod === 'oauth' ? 'Nextcloud OAuth' : 'Basic Auth'}
+                  </p>
+                )}
               </div>
               <DropdownMenuItem 
                 className="rounded-lg text-sm font-medium focus:bg-gray-50 focus:text-[#C36322] cursor-pointer"
@@ -202,6 +230,14 @@ export function CalendarHeader({
               >
                 Instellingen
               </DropdownMenuItem>
+              {caldavConfigured && onSync && (
+                <DropdownMenuItem 
+                  className="rounded-lg text-sm font-medium focus:bg-gray-50 focus:text-[#C36322] cursor-pointer"
+                  onClick={onSync}
+                >
+                  Nu synchroniseren
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem className="rounded-lg text-sm font-medium focus:bg-gray-50 focus:text-[#C36322] cursor-pointer text-red-500 focus:text-red-600" onClick={onLogout}>
                 Uitloggen
               </DropdownMenuItem>

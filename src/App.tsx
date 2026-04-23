@@ -10,7 +10,7 @@ import { CalendarGrid } from './components/CalendarGrid';
 import { EventDialog } from './components/EventDialog';
 import { AuthPage } from './components/AuthPage';
 import { SettingsPage } from './components/SettingsPage';
-import { CalendarEvent, CalendarView, CalendarCategory } from './types';
+import { CalendarEvent, CalendarView, CalendarCategory, User } from '@/src/types';
 import { INITIAL_EVENTS, INITIAL_CATEGORIES } from './constants';
 import { Toaster, toast } from 'sonner';
 import { startOfToday } from 'date-fns';
@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import { notificationService } from './lib/notificationService';
 
 export default function App() {
-  const [user, setUser] = React.useState<{ email: string; name: string } | null>(null);
+  const [user, setUser] = React.useState<User | null>(null);
   const [token, setToken] = React.useState<string | null>(localStorage.getItem('token'));
   const [currentDate, setCurrentDate] = React.useState(startOfToday());
   const [view, setView] = React.useState<CalendarView>('month');
@@ -34,6 +34,9 @@ export default function App() {
   const [selectedEvent, setSelectedEvent] = React.useState<Partial<CalendarEvent> | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isMockMode, setIsMockMode] = React.useState(false);
+  const [caldavConfigured, setCaldavConfigured] = React.useState(false);
+  const [authMethod, setAuthMethod] = React.useState<'oauth' | 'basic' | null>(null);
+  const [isSyncing, setIsSyncing] = React.useState(false);
 
   // Notification timer
   React.useEffect(() => {
@@ -64,6 +67,10 @@ export default function App() {
       const res = await fetch('/api/status');
       const data = await res.json();
       setIsMockMode(data.mock);
+      setCaldavConfigured(!!data.caldavConfigured);
+      if (data.authMethod) {
+        setAuthMethod(data.authMethod as 'oauth' | 'basic');
+      }
     } catch (err) {
       console.error("Status check failed", err);
     }
@@ -75,6 +82,23 @@ export default function App() {
 
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
+      
+      // Sync with CalDAV if configured
+      if (caldavConfigured) {
+        try {
+          setIsSyncing(true);
+          await fetch('/api/sync', {
+            method: 'POST',
+            headers,
+            signal: controller.signal
+          });
+        } catch (syncErr) {
+          console.log('CalDAV sync failed, continuing with local data:', syncErr);
+        } finally {
+          setIsSyncing(false);
+        }
+      }
+
       const [eventsRes, catsRes, settingsRes, meRes] = await Promise.all([
         fetch('/api/events', { headers, signal: controller.signal }),
         fetch('/api/categories', { headers, signal: controller.signal }),
@@ -90,7 +114,7 @@ export default function App() {
         const settingsData = await settingsRes.json();
         const meData = await meRes.json();
 
-        setUser({ email: meData.email, name: meData.name });
+        setUser({ id: meData.id, email: meData.email, name: meData.name, authMethod: meData.authMethod });
 
         // Convert date strings back to Date objects
         const formattedEvents = eventsData.map((e: any) => ({
@@ -113,30 +137,65 @@ export default function App() {
           setDefaultCalendarId(catsData[0].id);
         }
 
-        // Mock user from token decode or separate endpoint if needed
-        // For simplicity, we assume the token is enough for now or we could have a /api/auth/me
+        // Show welcome message
+        toast.success(`Welkom terug, ${meData.name}!`);
       } else if (eventsRes.status === 401 || eventsRes.status === 403) {
         handleLogout();
       }
     } catch (err) {
       console.error("Failed to fetch data", err);
+      toast.error('Failed to load data');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleLogin = (userData: { email: string; name: string }, authToken: string) => {
+  const handleLogin = (userData: User, authToken: string) => {
     setUser(userData);
     setToken(authToken);
     localStorage.setItem('token', authToken);
-    toast.success(`Welkom terug, ${userData.name}!`);
+    if (userData.authMethod) {
+      setAuthMethod(userData.authMethod);
+    }
+    // Data will be fetched by effect
   };
 
   const handleLogout = () => {
     setUser(null);
     setToken(null);
+    setEvents([]);
+    setCategories([]);
     localStorage.removeItem('token');
     toast.info('Succesvol uitgelogd');
+  };
+
+  // Sync with CalDAV
+  const handleSync = async () => {
+    if (!token) return;
+    
+    try {
+      setIsSyncing(true);
+      const headers = { 'Authorization': `Bearer ${token}` };
+      
+      const response = await fetch('/api/sync', {
+        method: 'POST',
+        headers
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        toast.success(`Synchronisatie volgtooid: ${data.syncedCalendars} agenda's gesynchroniseerd`);
+        // Refresh data
+        await fetchAllData();
+      } else {
+        throw new Error(data.error || 'Synchronisatie mislukt');
+      }
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   if (isLoading) {
@@ -144,7 +203,7 @@ export default function App() {
       <div className="h-screen w-full flex items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-t-[#C36322] border-gray-200 rounded-full animate-spin" />
-          <p className="text-gray-500 font-medium">Agenda laden...</p>
+          <p className="text-gray-500 font-medium">{isSyncing ? 'Synchroniseren met CalDAV...' : 'Agenda laden...'}</p>
         </div>
       </div>
     );
@@ -166,12 +225,14 @@ export default function App() {
     const updatedCategory = { ...category, isVisible: !category.isVisible };
     
     try {
+      const headers = { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+      
       const res = await fetch(`/api/categories/${id}`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers,
         body: JSON.stringify(updatedCategory)
       });
 
@@ -212,14 +273,19 @@ export default function App() {
       const isNew = !eventData.id;
       const method = isNew ? 'POST' : 'PUT';
       const url = isNew ? '/api/events' : `/api/events/${eventData.id}`;
-      const finalEvent = isNew ? { ...eventData, id: Math.random().toString(36).substr(2, 9) } : eventData;
+      const finalEvent = isNew ? { 
+        ...eventData, 
+        id: Math.random().toString(36).substr(2, 9) 
+      } : eventData;
 
+      const headers = { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+      
       const res = await fetch(url, {
         method,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers,
         body: JSON.stringify(finalEvent)
       });
 
@@ -227,7 +293,11 @@ export default function App() {
 
       if (res.ok) {
         if (isNew) {
-          setEvents(prev => [...prev, finalEvent as CalendarEvent]);
+          setEvents(prev => [...prev, {
+            ...(finalEvent as CalendarEvent),
+            start: new Date(finalEvent.start as Date),
+            end: new Date(finalEvent.end as Date)
+          }]);
           toast.success('Afspraak aangemaakt');
         } else {
           setEvents(prev => prev.map(e => e.id === eventData.id ? (eventData as CalendarEvent) : e));
@@ -244,9 +314,11 @@ export default function App() {
 
   const handleDeleteEvent = async (id: string) => {
     try {
+      const headers = { 'Authorization': `Bearer ${token}` };
+      
       const res = await fetch(`/api/events/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers
       });
 
       if (res.ok) {
@@ -266,12 +338,14 @@ export default function App() {
     const updatedEvent = { ...event, start: newStart, end: newEnd };
     
     try {
+      const headers = { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+      
       const res = await fetch(`/api/events/${eventId}`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers,
         body: JSON.stringify(updatedEvent)
       });
 
@@ -286,33 +360,39 @@ export default function App() {
 
   const updateSettings = async (newSettings: any) => {
     try {
+      const headers = { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+      
       await fetch('/api/user/settings', {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers,
         body: JSON.stringify(newSettings)
       });
     } catch (err) {
       console.error("Failed to save settings", err);
+      toast.error("Instellingen konden niet worden opgeslagen");
     }
   };
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 overflow-hidden relative">
-        <CalendarHeader 
-          currentDate={currentDate}
-          onNavigate={setCurrentDate}
-          view={view}
-          onViewChange={setView}
-          onToday={() => setCurrentDate(startOfToday())}
-          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-          user={user}
-          onLogout={handleLogout}
-          onSettings={() => setIsSettingsOpen(true)}
-          isMockMode={isMockMode}
-        />
+      <CalendarHeader 
+        currentDate={currentDate}
+        onNavigate={setCurrentDate}
+        view={view}
+        onViewChange={setView}
+        onToday={() => setCurrentDate(startOfToday())}
+        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        user={user}
+        onLogout={handleLogout}
+        onSettings={() => setIsSettingsOpen(true)}
+        isMockMode={isMockMode}
+        isSyncing={isSyncing}
+        onSync={handleSync}
+        caldavConfigured={caldavConfigured}
+      />
       
       <div className="flex flex-1 overflow-hidden relative">
         {/* Mobile Sidebar Overlay */}
@@ -347,6 +427,8 @@ export default function App() {
               setIsSettingsOpen(true);
               if (window.innerWidth < 1024) setIsSidebarOpen(false);
             }}
+            onSync={handleSync}
+            isSyncing={isSyncing}
           />
         </div>
         
@@ -403,12 +485,9 @@ export default function App() {
               }}
               onUpdateCategories={(newCats) => {
                 setCategories(newCats);
-                // For now we just update locally as we don't have a bulk API yet
-                // but we close the settings.
                 setIsSettingsOpen(false);
               }}
               onImportEvents={(newEvents) => {
-                // In a real app we'd bulk upload these to the server
                 setEvents(prev => [...prev, ...newEvents]);
               }}
               onClose={() => setIsSettingsOpen(false)} 

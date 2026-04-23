@@ -1,3 +1,4 @@
+version: '3.8'
 services:
   app:
     build: .
@@ -6,5 +7,14 @@ services:
     restart: always
     environment:
       - JWT_SECRET=${JWT_SECRET:-default-secret-key-123}
+      - CALDAV_AUTH_METHOD=${CALDAV_AUTH_METHOD:-basic}
+      - CALDAV_SERVER_URL=${CALDAV_SERVER_URL:-https://your-caldav-server.com/caldav}
+      - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
+      - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
+      - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/api/auth/oauth/callback}
+      - OAUTH_AUTH_URL=${OAUTH_AUTH_URL:-https://your-nextcloud-server.com/oauth2/authorize}
+      - OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL:-https://your-nextcloud-server.com/oauth2/token}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - APP_URL=${APP_URL:-http://localhost:3000}
     volumes:
       - ./data:/app/data

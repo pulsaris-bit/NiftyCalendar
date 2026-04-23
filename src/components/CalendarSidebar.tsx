@@ -4,7 +4,7 @@
  */
 
 import * as React from 'react';
-import { Plus, Calendar as CalendarIcon, Check, Settings, HelpCircle, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Check, Settings, HelpCircle, ChevronLeft, ChevronRight, LogOut, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarCategory } from '@/src/types';
@@ -22,6 +22,8 @@ interface CalendarSidebarProps {
   onAddEvent: () => void;
   onLogout: () => void;
   onSettings: () => void;
+  onSync?: () => void;
+  isSyncing?: boolean;
 }
 
 export function CalendarSidebar({
@@ -31,7 +33,9 @@ export function CalendarSidebar({
   onDateChange,
   onAddEvent,
   onLogout,
-  onSettings
+  onSettings,
+  onSync,
+  isSyncing = false
 }: CalendarSidebarProps) {
   const [viewMonth, setViewMonth] = React.useState(selectedDate);
 
@@ -43,13 +47,29 @@ export function CalendarSidebar({
   return (
     <aside className="w-64 bg-[#1c1917] border-r border-stone-800 flex flex-col h-full overflow-hidden shadow-xl">
       <div className="p-4 shrink-0">
-        <Button 
-          onClick={onAddEvent}
-          className="w-full bg-[#C36322] hover:bg-[#a6541d] text-white font-medium py-2 rounded-md shadow-lg shadow-black/20 transition-all active:scale-95 h-10 border-0"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          <span className="text-sm">Afspraak maken</span>
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            onClick={onAddEvent}
+            className="flex-1 bg-[#C36322] hover:bg-[#a6541d] text-white font-medium py-2 rounded-md shadow-lg shadow-black/20 transition-all active:scale-95 h-10 border-0"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            <span className="text-sm">Afspraak maken</span>
+          </Button>
+          
+          {/* Sync Button - show if configured */}
+          {onSync && (
+            <Button
+              onClick={onSync}
+              variant="outline"
+              size="icon"
+              className="h-10 w-10 border-0 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white transition-all"
+              disabled={isSyncing}
+              title="Synchroniseren met CalDAV"
+            >
+              <RefreshCw className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="px-4 pb-4 border-b border-stone-800 flex flex-col shrink-0">
@@ -114,6 +134,12 @@ export function CalendarSidebar({
                     >
                       {category.name}
                     </label>
+                    {category.isCaldav && (
+                      <span className="text-[8px] bg-green-600/20 text-green-400 px-1 rounded font-bold">CalDAV</span>
+                    )}
+                    {category.syncEnabled === false && (
+                      <span className="text-[8px] bg-amber-600/20 text-amber-400 px-1 rounded font-bold">Lokaal</span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -123,6 +149,31 @@ export function CalendarSidebar({
         </div>
       </ScrollArea>
 
+      <div className="p-2 border-t border-stone-800 shrink-0">
+        <div className="flex gap-1 px-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onSettings}
+            className="flex-1 h-8 text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-all"
+            title="Instellingen"
+          >
+            <Settings className="h-4 w-4 mr-1" />
+            <span className="text-xs">Instellingen</span>
+          </Button>
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onLogout}
+            className="flex-1 h-8 text-stone-400 hover:text-red-400 hover:bg-red-900/20 transition-all"
+            title="Uitloggen"
+          >
+            <LogOut className="h-4 w-4 mr-1" />
+            <span className="text-xs">Uitloggen</span>
+          </Button>
+        </div>
+      </div>
     </aside>
   );
 }
