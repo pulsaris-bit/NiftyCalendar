@@ -415,7 +415,7 @@ export function SettingsPage({
               <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-[#C36322]">
+                    <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-[#C36322] border-2 border-[#C36322]">
                       <Layout className="w-5 h-5" />
                     </div>
                     <div>
@@ -434,7 +434,7 @@ export function SettingsPage({
 
               <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-[#C36322]">
+                  <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-[#C36322] border-2 border-[#C36322]">
                     <CalendarIcon className="w-5 h-5" />
                   </div>
                   <div>
@@ -463,7 +463,7 @@ export function SettingsPage({
 
               <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-[#C36322]">
+                  <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-[#C36322] border-2 border-[#C36322]">
                     <Clock className="w-5 h-5" />
                   </div>
                   <div>
@@ -494,7 +494,7 @@ export function SettingsPage({
             <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
               <div className="flex flex-col gap-6">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-[#C36322]">
+                  <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-[#C36322] border-2 border-[#C36322]">
                     <Upload className="w-5 h-5" />
                   </div>
                   <div>
