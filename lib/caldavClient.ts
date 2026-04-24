@@ -577,8 +577,11 @@ export class CalDAVClient {
     }
 
     try {
-      const startDate = start || new Date(0);
+      // Default to 1 year range if no dates provided
+      const startDate = start || new Date();
+      startDate.setFullYear(startDate.getFullYear() - 1);
       const endDate = end || new Date();
+      endDate.setFullYear(endDate.getFullYear() + 1);
       
       const startStr = this.formatDateForQuery(startDate);
       const endStr = this.formatDateForQuery(endDate);
@@ -781,9 +784,18 @@ export class CalDAVClient {
    */
   private createICalEvent(eventData: Partial<CalDAVEvent> & { title: string; start: Date; end: Date }): string {
     const uid = eventData.id || `event-${Date.now()}`;
-    const startDate = this.formatDateForICal(eventData.start, eventData.isAllDay);
-    const endDate = this.formatDateForICal(eventData.end, eventData.isAllDay);
+    // For floating time events (from ICS import without timezone), don't append Z
+    const isFloating = eventData.isAllDay ? false : true;
+    const startDate = this.formatDateForICal(eventData.start, eventData.isAllDay, isFloating);
+    const endDate = this.formatDateForICal(eventData.end, eventData.isAllDay, isFloating);
     const nowDate = this.formatDateForICal(new Date(), false);
+    
+    const startLine = eventData.isAllDay 
+      ? `DTSTART;VALUE=DATE:${startDate}`
+      : `DTSTART:${startDate}`;
+    const endLine = eventData.isAllDay 
+      ? `DTEND;VALUE=DATE:${endDate}`
+      : `DTEND:${endDate}`;
     
     const lines = [
       'BEGIN:VCALENDAR',
@@ -792,8 +804,8 @@ export class CalDAVClient {
       'BEGIN:VEVENT',
       `UID:${uid}`,
       `DTSTAMP:${nowDate}`,
-      `DTSTART:${startDate}`,
-      `DTEND:${endDate}`,
+      startLine,
+      endLine,
       `SUMMARY:${this.escapeICalText(eventData.title)}`,
     ];
 
@@ -818,7 +830,7 @@ export class CalDAVClient {
   /**
    * Format date for iCalendar
    */
-  private formatDateForICal(date: Date, allDay?: boolean): string {
+  private formatDateForICal(date: Date, allDay?: boolean, isFloating?: boolean): string {
     if (allDay) {
       const year = date.getUTCFullYear();
       const month = String(date.getUTCMonth() + 1).padStart(2, '0');
@@ -832,6 +844,12 @@ export class CalDAVClient {
     const hours = String(date.getUTCHours()).padStart(2, '0');
     const minutes = String(date.getUTCMinutes()).padStart(2, '0');
     const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+    
+    // For floating time (no timezone), don't append Z
+    // For UTC time, append Z
+    if (isFloating) {
+      return `${year}${month}${day}T${hours}${minutes}${seconds}`;
+    }
     return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
   }
 

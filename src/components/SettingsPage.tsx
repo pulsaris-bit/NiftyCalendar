@@ -24,7 +24,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'motion/react';
-import ICAL from 'ical.js';
 import { toast } from 'sonner';
 import { notificationService } from '@/src/lib/notificationService';
 import { Button } from '@/components/ui/button';
@@ -203,41 +202,42 @@ export function SettingsPage({
     onClose();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !token) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const icsData = event.target?.result as string;
-        const jcalData = ICAL.parse(icsData);
-        const vcalendar = new ICAL.Component(jcalData);
-        const vevents = vcalendar.getAllSubcomponents('vevent');
         
-        const importedEvents: CalendarEvent[] = vevents.map(vevent => {
-          const icalEvent = new ICAL.Event(vevent);
-          return {
-            id: Math.random().toString(36).substr(2, 9),
-            title: icalEvent.summary || 'Naamloze afspraak',
-            start: icalEvent.startDate.toJSDate(),
-            end: icalEvent.endDate.toJSDate(),
-            description: icalEvent.description || '',
-            location: icalEvent.location || '',
+        // Send to CalDAV server for import
+        const response = await fetch('/api/caldav/import', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
             calendarId: importTargetCalendarId,
-            isAllDay: icalEvent.startDate.isDate,
-          };
+            icsFile: icsData
+          })
         });
 
-        if (importedEvents.length > 0) {
-          onImportEvents(importedEvents);
-          toast.success(`${importedEvents.length} afspraken succesvol geïmporteerd!`);
+        const result = await response.json();
+        
+        if (response.ok) {
+          toast.success(result.message || `${result.count} afspraken geïmporteerd naar CalDAV`);
+          // Reload events from CalDAV
+          if (typeof window !== 'undefined' && window.location) {
+            window.location.reload();
+          }
         } else {
-          toast.error('Geen geldige afspraken gevonden in dit bestand.');
+          toast.error(result.error || 'Fout bij importeren naar CalDAV');
         }
       } catch (error) {
-        console.error('Error parsing ICS:', error);
-        toast.error('Fout bij het laden van het .ics bestand. Controleer of het bestand geldig is.');
+        console.error('Error importing ICS:', error);
+        toast.error('Fout bij het importeren van het .ics bestand.');
       }
     };
     reader.readAsText(file);

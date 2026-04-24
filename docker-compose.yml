@@ -27,6 +27,8 @@ services:
     image: tomsquest/docker-radicale:latest
     container_name: radicale
     restart: unless-stopped
+    environment:
+      - TIMEZONE=Europe/Amsterdam 
     ports:
       - "5232:5232"
     volumes:

@@ -54,20 +54,20 @@ export function CalendarSidebar({
         </div>
       </div>
 
-      <div className="px-4 pb-4 border-b border-stone-800 flex flex-col shrink-0">
+      <div className="px-4 pb-4 border-b border-stone-800">
         <div className="flex justify-between items-center mb-3 px-1 text-stone-200">
           <span className="font-semibold text-sm uppercase tracking-tight">
             {format(viewMonth, 'MMMM yyyy', { locale: nl })}
           </span>
           <div className="flex gap-2 text-stone-500">
-             <ChevronLeft 
-              className="w-4 h-4 cursor-pointer hover:text-stone-200 transition-colors" 
+            <ChevronLeft 
+              className="w-4 h-4 cursor-pointer hover:text-white transition-colors" 
               onClick={() => setViewMonth(subMonths(viewMonth, 1))}
-             />
-             <ChevronRight 
-              className="w-4 h-4 cursor-pointer hover:text-stone-200 transition-colors" 
+            />
+            <ChevronRight 
+              className="w-4 h-4 cursor-pointer hover:text-white transition-colors" 
               onClick={() => setViewMonth(addMonths(viewMonth, 1))}
-             />
+            />
           </div>
         </div>
         <Calendar
@@ -80,17 +80,12 @@ export function CalendarSidebar({
           locale={nl}
           className="rounded-md border-0 bg-transparent p-0 scale-[0.9] origin-top -mt-2"
           classNames={{
-            day_selected: "bg-[#C36322] text-white rounded-full",
-            day_today: "bg-[#C36322] text-stone-900 rounded-full font-bold",
-            head_cell: "text-stone-600 font-bold text-[10px] uppercase w-8 h-8",
-            day: "h-8 w-8 text-xs p-0 font-normal text-stone-400 aria-selected:opacity-100 hover:bg-stone-800 hover:text-stone-200 rounded-full transition-colors",
+            day: "h-8 w-8 text-xs p-0 font-normal text-stone-400 rounded-full hover:text-[#C36322] transition-colors",
+            day_today: "h-8 w-8 text-xs p-0 font-bold text-white bg-[#C36322] rounded-full",
+            day_selected: "h-8 w-8 text-xs p-0 font-bold text-white bg-[#C36322] rounded-full",
+            head_cell: "text-stone-500 font-bold text-[10px] uppercase w-8 h-8",
             nav: "hidden",
             table: "w-full border-collapse space-y-1",
-          }}
-          modifiersStyles={{
-            today: {
-              selected: 'bg-white text-[#C36322] font-bold',
-            }
           }}
         />
       </div>

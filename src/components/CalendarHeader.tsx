@@ -8,7 +8,6 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Menu, 
-  Search, 
   HelpCircle,
   Calendar as CalendarIcon
 } from 'lucide-react';
@@ -16,7 +15,6 @@ import { Button } from '@/components/ui/button';
 import { CalendarView } from '../types';
 import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfWeek, endOfWeek, isSameMonth } from 'date-fns';
 import { nl } from 'date-fns/locale';
-import { Input } from '@/components/ui/input';
 
 import { 
   DropdownMenu,
@@ -135,14 +133,6 @@ export function CalendarHeader({
       </div>
 
       <div className="flex items-center gap-0.5 sm:gap-1">
-        <div className="relative group hidden lg:block">
-          <Input 
-            placeholder="Afspraken zoeken..." 
-            className="pl-8 pr-4 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-sm focus-visible:ring-2 focus-visible:ring-[#C36322] w-48 xl:w-64 h-9 transition-all"
-          />
-          <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-gray-400 group-focus-within:text-[#C36322] transition-colors" />
-        </div>
-        
         <div className="lg:hidden shrink-0 ml-auto">
           <DropdownMenu>
             <DropdownMenuTrigger className="text-gray-400 h-9 w-8 sm:w-9 hover:bg-slate-100 rounded-md flex items-center justify-center transition-all outline-none">

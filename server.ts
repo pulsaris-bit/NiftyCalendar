@@ -12,6 +12,7 @@ import CryptoJS from "crypto-js";
 import { NextcloudOAuthClient } from './lib/oauthClient';
 import { CalDAVClient, createCalDAVClientFromEnv } from './lib/caldavClient';
 import { encryptPassword as forgeEncrypt, decryptPassword as forgeDecrypt } from './lib/encryption';
+import ICAL from 'ical.js';
 
 dotenv.config();
 
@@ -717,6 +718,134 @@ app.delete("/api/caldav/calendars/:calendarId", authenticateToken, async (req: a
   }
 });
 
+// Import ICS to CalDAV endpoint
+app.post("/api/caldav/import", authenticateToken, async (req: any, res) => {
+  try {
+    if (!CALDAV_SERVER_URL || !CALDAV_AUTH_METHOD) {
+      return res.status(503).json({ error: "CalDAV server is niet geconfigureerd" });
+    }
+
+    const { calendarId, icsFile } = req.body;
+    
+    if (!calendarId) {
+      return res.status(400).json({ error: "calendarId is vereist" });
+    }
+    
+    if (!icsFile) {
+      return res.status(400).json({ error: "ICS bestand is vereist" });
+    }
+
+    const userRow = db.prepare("SELECT auth_method, encrypted_password, encryption_iv, access_token, caldav_username FROM users WHERE id = ?").get(req.user.id) as any;
+    
+    if (!userRow) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const client = new CalDAVClient({
+      serverUrl: CALDAV_SERVER_URL,
+      authMethod: userRow.auth_method as 'oauth' | 'basic',
+      encryptionKey: ENCRYPTION_KEY
+    });
+
+    if (userRow.auth_method === 'oauth') {
+      await client.initialize(undefined, undefined, userRow.access_token);
+    } else {
+      const password = userRow.encrypted_password && userRow.encryption_iv
+        ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
+        : undefined;
+      await client.initialize(userRow.caldav_username || req.user.username, password);
+    }
+
+    // Parse the ICS file
+    const jcalData = ICAL.parse(icsFile);
+    const vcalendar = new ICAL.Component(jcalData);
+    
+    // Get the timezone from the VCALENDAR component
+    // This helps us properly convert times to UTC
+    const timezoneInfo = vcalendar.getFirstPropertyValue('VTIMEZONE');
+    const defaultTimezone = vcalendar.getFirstPropertyValue('TZID');
+    const hasTimezone = !!timezoneInfo || !!defaultTimezone;
+    
+    console.log(`[ICS IMPORT] VCALENDAR has timezone: ${hasTimezone}, defaultTimezone: ${defaultTimezone}`);
+    
+    const vevents = vcalendar.getAllSubcomponents('vevent');
+    
+    let importedCount = 0;
+    
+    for (const vevent of vevents) {
+      const icalEvent = new ICAL.Event(vevent);
+      
+      const title = icalEvent.summary || 'Naamloze afspraak';
+      const startTime = icalEvent.startDate;
+      const endTime = icalEvent.endDate;
+      
+      const description = icalEvent.description || undefined;
+      const location = icalEvent.location || undefined;
+      const isAllDay = startTime.isDate;
+      const recurrenceRule = icalEvent.recurrenceId ? undefined : undefined;
+      
+      // Use toJSDate() which handles timezone conversion properly
+      // ICAL.js will convert from the file's timezone to the server's local timezone
+      // Since our server is in UTC, this works correctly if the file has timezone info
+      // For files without timezone (floating time), toJSDate() returns the date "as-is"
+      let startJsDate = startTime.toJSDate();
+      let endJsDate = endTime.toJSDate();
+      
+      // For floating time (no timezone in the .ics), we need to handle it differently
+      // Unfortunately, ICAL.js doesn't distinguish between UTC and floating time
+      // in toJSDate(). We'll assume that if there's no timezone info in the VCALENDAR
+      // or in the DTSTART, then it's floating time meant to be in local timezone.
+      // Since we don't know the client timezone, we'll mark these as needing special
+      // handling in the CalDAV client by setting a flag. But for now, we'll treat them
+      // as UTC (which is the server timezone).
+      
+      // For all-day events from floating time, need to handle separately
+      if (isAllDay) {
+        // For all-day events, the time should be 00:00:00 UTC on the given date
+        // This is what VALUE=DATE means
+        const start = startTime.toJSDate();
+        const end = endTime.toJSDate();
+        
+        // Create new dates at midnight UTC
+        startJsDate = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+        endJsDate = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+        // All-day end is exclusive, so add one day
+        endJsDate.setUTCDate(endJsDate.getUTCDate() + 1);
+      }
+      
+      // Skip invalid dates
+      if (isNaN(startJsDate.getTime()) || isNaN(endJsDate.getTime())) {
+        console.warn('[ICS IMPORT] Skipping event with invalid date:', title);
+        continue;
+      }
+
+      try {
+        await client.createEvent(calendarId, {
+          title,
+          start: startJsDate,
+          end: endJsDate,
+          description,
+          location,
+          isAllDay,
+          recurrenceRule
+        });
+        importedCount++;
+      } catch (err) {
+        console.error('[ICS IMPORT] Failed to create event:', title, err);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${importedCount} afspraken succesvol geïmporteerd naar CalDAV`,
+      count: importedCount
+    });
+  } catch (err: any) {
+    console.error('Failed to import ICS to CalDAV:', err);
+    res.status(500).json({ error: "ICS import mislukt: " + (err.message || String(err)) });
+  }
+});
+
 // Categories Routes - Direct CalDAV only, no local fallback
 app.get("/api/categories", authenticateToken, async (req: any, res) => {
   try {
@@ -799,10 +928,10 @@ app.get("/api/events", authenticateToken, async (req: any, res) => {
 
     // If calendarId is provided, get events from that specific calendar
     // Otherwise, get events from all calendars
-    // If no date range provided, use current month as default
+    // If no date range provided, use a range of one year back to one year forward
     const now = new Date();
-    const startDate = start ? new Date(start as string) : new Date(now.getFullYear(), now.getMonth(), 1);
-    const endDate = end ? new Date(end as string) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const startDate = start ? new Date(start as string) : new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    const endDate = end ? new Date(end as string) : new Date(now.getFullYear() + 1, now.getMonth(), now.getDate(), 23, 59, 59, 999);
     
     let events: any[] = [];
     if (calendarId) {
