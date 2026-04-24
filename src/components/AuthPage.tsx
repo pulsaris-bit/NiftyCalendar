@@ -253,9 +253,8 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center">
                     <Label htmlFor="password" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Wachtwoord</Label>
-                    <a href="#" className="text-[10px] font-bold uppercase text-[#C36322] hover:underline">Vergeten?</a>
                   </div>
                   <div className="relative group">
                     <Input 
@@ -284,21 +283,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                 </Button>
               </form>
               
-              {/* OAuth option for Basic Auth mode */}
-              {caldavConfig?.authMethod === 'basic' && (
-                <CardFooter className="flex justify-center pt-4 pb-0">
-                  <p className="text-xs text-gray-500">
-                    Of log in via CalDAV server 
-                    <Button 
-                      variant="link" 
-                      className="text-[#C36322] p-0 h-auto text-xs font-bold"
-                      onClick={() => setAuthMethod('oauth')}
-                    >
-                      OAuth configureren
-                    </Button>
-                  </p>
-                </CardFooter>
-              )}
+
             </div>
           )}
         </Card>

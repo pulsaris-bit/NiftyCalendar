@@ -372,7 +372,22 @@ export function CalendarGrid({
                 </div>
                 <div className="flex-1 grid grid-cols-7 grid-rows-6 auto-rows-fr h-full divide-x divide-y divide-gray-100">
                   {days.map((day, idx) => {
-                    const dayEvents = getEventsForDay(day);
+                    // Include multi-day events that overlap with this day
+                    const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0);
+                    const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1, 0, 0, 0, 0);
+                    const dayEvents = getFilteredEvents().filter(event => {
+                      const eventStart = new Date(event.start);
+                      const eventEnd = new Date(event.end);
+                      // For all-day events: check if day is between start and end (exclusive)
+                      if (event.isAllDay) {
+                        const eventStartDate = new Date(eventStart.getFullYear(), eventStart.getMonth(), eventStart.getDate());
+                        const eventEndDate = new Date(eventEnd.getFullYear(), eventEnd.getMonth(), eventEnd.getDate());
+                        const checkDay = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+                        return eventStartDate <= checkDay && checkDay < eventEndDate;
+                      }
+                      // For timed events: check if event overlaps with day
+                      return eventStart < dayEnd && eventEnd > dayStart;
+                    });
                     const isSelected = isSameDay(day, selectedMobileDate);
                     const isCurrentMonth = isSameMonth(day, monthStart);
 
@@ -509,14 +524,67 @@ export function CalendarGrid({
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     const hours = Array.from({ length: 24 }, (_, i) => i);
 
-    const getEventStyles = (event: CalendarEvent) => {
-      if (event.isAllDay) return {};
-      const startHour = event.start.getHours();
-      const startMin = event.start.getMinutes();
-      const endHour = event.end.getHours();
-      const endMin = event.end.getMinutes();
+    // Helper to check if event overlaps with a day
+    const eventOverlapsDay = (event: CalendarEvent, day: Date): boolean => {
+      const eventStart = new Date(event.start);
+      const eventEnd = new Date(event.end);
       
-      const top = (startHour * 60 + startMin) * (60 / 60); // 60px per hour
+      const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0);
+      const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1, 0, 0, 0, 0);
+      
+      // Check if event overlaps with this day
+      return eventStart < dayEnd && eventEnd > dayStart;
+    };
+
+    const getEventStyles = (event: CalendarEvent, day: Date) => {
+      if (event.isAllDay) return {};
+      
+      const eventStart = new Date(event.start);
+      const eventEnd = new Date(event.end);
+      const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0);
+      const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1, 0, 0, 0, 0);
+      
+      const startHour = eventStart.getHours();
+      const startMin = eventStart.getMinutes();
+      const endHour = eventEnd.getHours();
+      const endMin = eventEnd.getMinutes();
+      
+      // Determine if this day is the start, middle, or end day of the event
+      const isStartDay = isSameDay(eventStart, day);
+      const isEndDay = isSameDay(eventEnd, day);
+      const isSameStartAndEndDay = isStartDay && isEndDay;
+      
+      // For multi-day events
+      if (!isSameStartAndEndDay) {
+        if (isStartDay) {
+          // Start day: top = start time, height = until end of day
+          const top = (startHour * 60 + startMin) * (60 / 60);
+          const duration = 24 * 60 - (startHour * 60 + startMin); // Until midnight
+          return {
+            top: `${top}px`,
+            height: `${Math.max(duration, 30)}px`,
+            position: 'absolute' as const,
+          };
+        } else if (isEndDay) {
+          // End day: top = 0, height = end time
+          const duration = (endHour * 60 + endMin) * (60 / 60);
+          return {
+            top: `0px`,
+            height: `${Math.max(duration, 30)}px`,
+            position: 'absolute' as const,
+          };
+        } else {
+          // Middle day: full day height
+          return {
+            top: `0px`,
+            height: `1440px`,
+            position: 'absolute' as const,
+          };
+        }
+      }
+      
+      // Same day event: normal calculation
+      const top = (startHour * 60 + startMin) * (60 / 60);
       const duration = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) * (60 / 60);
       
       return {
@@ -573,7 +641,12 @@ export function CalendarGrid({
                                   <div 
                                     key={event.id}
                                     onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
-                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-100 border-l-2 border-[#C36322] text-[#C36322] truncate cursor-pointer hover:brightness-95 transition-all"
+                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded truncate cursor-pointer hover:brightness-95 transition-all"
+                                    style={{
+                                      backgroundColor: category?.color ? `${category.color}20` : '#FEF3C7',
+                                      borderLeft: `2px solid ${category?.color || '#C36322'}`,
+                                      color: category?.color || '#C36322'
+                                    }}
                                   >
                                      {event.title}
                                   </div>
@@ -611,7 +684,7 @@ export function CalendarGrid({
 
                    {/* Day Columns */}
                    {days.map(day => {
-                      const dayEvents = getFilteredEvents().filter(e => isSameDay(e.start, day));
+                      const dayEvents = getFilteredEvents().filter(e => eventOverlapsDay(e, day));
                       const timedEvents = dayEvents.filter(e => !e.isAllDay);
 
                       return (
@@ -633,7 +706,7 @@ export function CalendarGrid({
                            <div className="relative flex-1 h-full">
                               {timedEvents.map(event => {
                                  const category = categories.find(c => c.id === event.calendarId);
-                                 const styles = getEventStyles(event);
+                                 const styles = getEventStyles(event, day);
                                  return (
                                     <DraggableEvent key={event.id} event={event} styles={styles} className="w-full">
                                       <div 
@@ -722,17 +795,68 @@ export function CalendarGrid({
   }
 
   if (view === 'day') {
-    const dayEvents = getEventsForDay(currentDate);
+    // Get all events that overlap with this day
+    const dayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 0, 0, 0, 0);
+    const dayEnd = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() + 1, 0, 0, 0, 0);
+    const dayEvents = getFilteredEvents().filter(event => {
+      const eventStart = new Date(event.start);
+      const eventEnd = new Date(event.end);
+      // For all-day events: check if day is between start and end (exclusive)
+      if (event.isAllDay) {
+        const eventStartDate = new Date(eventStart.getFullYear(), eventStart.getMonth(), eventStart.getDate());
+        const eventEndDate = new Date(eventEnd.getFullYear(), eventEnd.getMonth(), eventEnd.getDate());
+        const checkDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+        return eventStartDate <= checkDay && checkDay < eventEndDate;
+      }
+      // For timed events: check if event overlaps with day
+      return eventStart < dayEnd && eventEnd > dayStart;
+    });
     const hours = Array.from({ length: 24 }, (_, i) => i);
     const allDayEvents = dayEvents.filter(e => e.isAllDay);
     const timedEvents = dayEvents.filter(e => !e.isAllDay);
 
     const getEventStyles = (event: CalendarEvent) => {
-      const startHour = event.start.getHours();
-      const startMin = event.start.getMinutes();
-      const endHour = event.end.getHours();
-      const endMin = event.end.getMinutes();
+      const eventStart = new Date(event.start);
+      const eventEnd = new Date(event.end);
+      const viewDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
       
+      const startHour = eventStart.getHours();
+      const startMin = eventStart.getMinutes();
+      const endHour = eventEnd.getHours();
+      const endMin = eventEnd.getMinutes();
+      
+      const isStartDay = isSameDay(eventStart, viewDay);
+      const isEndDay = isSameDay(eventEnd, viewDay);
+      const isMiddleDay = !isStartDay && !isEndDay;
+      
+      // Handle multi-day events
+      if (isMiddleDay) {
+        // Middle day of multi-day event: full day
+        return {
+          top: `0px`,
+          height: `1440px`,
+          position: 'absolute' as const,
+        };
+      } else if (isStartDay && !isEndDay) {
+        // Start day of multi-day event: from start time to end of day
+        const top = (startHour * 60 + startMin);
+        const duration = 24 * 60 - (startHour * 60 + startMin); // Until midnight
+        return {
+          top: `${top}px`,
+          height: `${Math.max(duration, 30)}px`,
+          position: 'absolute' as const,
+        };
+      } else if (!isStartDay && isEndDay) {
+        // End day of multi-day event: from start of day to end time
+        const duration = (endHour * 60 + endMin);
+        return {
+          top: `0px`,
+          height: `${Math.max(duration, 30)}px`,
+          position: 'absolute' as const,
+        };
+      }
+      
+      // Same day event: normal calculation
       const top = (startHour * 60 + startMin);
       const duration = ((endHour * 60 + endMin) - (startHour * 60 + startMin));
       

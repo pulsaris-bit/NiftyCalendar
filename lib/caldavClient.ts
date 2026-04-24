@@ -3,6 +3,7 @@
  * This is a more reliable approach that doesn't depend on tsdav's complex types
  */
 
+import ICAL from 'ical.js';
 import { encryptPassword as forgeEncrypt, decryptPassword as forgeDecrypt } from './encryption';
 
 interface CalDAVConfig {
@@ -21,6 +22,7 @@ interface CalDAVCalendar {
   isShared: boolean;
   canEdit: boolean;
   description?: string;
+  isDeleted?: boolean;
 }
 
 interface CalDAVEvent {
@@ -67,6 +69,7 @@ export class CalDAVClient {
         throw new Error('Access token is required for OAuth authentication');
       }
       this.accessToken = accessToken;
+      this.username = username; // Store username for Nextcloud calendar URL construction
     } else {
       // Basic Auth
       if (!username || !password) {
@@ -161,66 +164,120 @@ export class CalDAVClient {
     try {
       // First, discover the calendar home set
       // For Radicale: PROPFIND / with Depth:0 to get calendar-home-set
-      // For Nextcloud: the serverUrl might already point to the calendar home
+      // For Nextcloud: calendar-home-set returns /principals/users/USERNAME/ but calendars are under /calendars/USERNAME/
       let calendarsUrl = this.config.serverUrl;
       
-      // Try to discover calendar-home-set first
-      try {
-        const homeResponse = await this.fetchWithAuth(calendarsUrl, {
-          method: 'PROPFIND',
-          headers: {
-            'Content-Type': 'application/xml',
-            'Depth': '0'
-          },
-          body: `<?xml version="1.0" encoding="utf-8" ?>
+      // Special handling for Nextcloud
+      console.log('[CalDAV] Discovering calendars for user:', this.username, 'serverUrl:', this.config.serverUrl);
+      if (this.config.serverUrl.includes('remote.php/dav') && this.username) {
+        // For Nextcloud, calendars are under /remote.php/dav/calendars/USERNAME/
+        // Also check for shared calendars and calendar-home-set
+        const base = this.config.serverUrl.replace(/\/$/, '');
+        
+        // Try multiple paths for Nextcloud: user's own calendars, shared calendars, and calendar-home-set
+        const pathsToTry = [
+          `${base}/calendars/${this.username}/`,
+          `${base}/calendars/user-shared/${this.username}/`,
+          `${base}/calendars/shared/`
+        ];
+        
+        // Try each path and collect all calendars
+        let allCalendars: CalDAVCalendar[] = [];
+        for (const path of pathsToTry) {
+          try {
+            console.log('[CalDAV] Trying calendar path:', path);
+            const response = await this.fetchWithAuth(path, {
+              method: 'PROPFIND',
+              headers: {
+                'Content-Type': 'application/xml',
+                'Depth': '1'
+              },
+              body: `<?xml version="1.0" encoding="utf-8" ?>
+<d:propfind xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}" xmlns:apple="${NS_ICAL}">
+  <d:prop>
+    <d:displayname/>
+    <d:resourcetype/>
+    <c:calendar-description/>
+    <apple:calendar-color/>
+    <c:supported-calendar-component-set/>
+  </d:prop>
+</d:propfind>`
+            });
+            
+            if (response.ok) {
+              const text = await response.text();
+              const calendars = this.parseCalendarsFromXML(text, path);
+              allCalendars = [...allCalendars, ...calendars];
+              console.log('[CalDAV] Found calendars at', path, ':', calendars.map(c => ({ id: c.id, name: c.name })));
+            }
+          } catch (e) {
+            console.log('[CalDAV] No calendars found at', path);
+          }
+        }
+        
+        console.log('[CalDAV] Total calendars found for user:', allCalendars.length);
+        return allCalendars;
+      } else {
+        // Try to discover calendar-home-set first (for Radicale and other servers)
+        console.log('[CalDAV] Using discovery for calendar home set');
+        try {
+          const homeResponse = await this.fetchWithAuth(calendarsUrl, {
+            method: 'PROPFIND',
+            headers: {
+              'Content-Type': 'application/xml',
+              'Depth': '0'
+            },
+            body: `<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}">
   <d:prop>
     <c:calendar-home-set/>
     <d:current-user-principal/>
   </d:prop>
 </d:propfind>`
-        });
+          });
 
-        if (homeResponse.ok) {
-          const homeText = await homeResponse.text();
-          // Try calendar-home-set first
-          const calendarHomeMatch = homeText.match(/<c:calendar-home-set[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
-          if (calendarHomeMatch) {
-            const homeHref = calendarHomeMatch[1];
-            // If it's a relative URL, prepend the base
-            if (homeHref.startsWith('/')) {
-              const url = new URL(calendarsUrl);
-              calendarsUrl = `${url.protocol}//${url.host}${homeHref}`;
-            } else {
-              calendarsUrl = homeHref;
-            }
-          } else {
-            // Fall back to current-user-principal
-            const principalMatch = homeText.match(/<d:current-user-principal[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
-            if (principalMatch) {
-              const principalHref = principalMatch[1];
-              if (principalHref.startsWith('/')) {
+          if (homeResponse.ok) {
+            const homeText = await homeResponse.text();
+            // Try calendar-home-set first
+            const calendarHomeMatch = homeText.match(/<c:calendar-home-set[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
+            if (calendarHomeMatch) {
+              const homeHref = calendarHomeMatch[1];
+              // If it's a relative URL, prepend the base
+              if (homeHref.startsWith('/')) {
                 const url = new URL(calendarsUrl);
-                calendarsUrl = `${url.protocol}//${url.host}${principalHref}`;
+                calendarsUrl = `${url.protocol}//${url.host}${homeHref}`;
               } else {
-                calendarsUrl = principalHref;
+                calendarsUrl = homeHref;
               }
-            } else if (this.username) {
-              // Last fallback: use /<username>/
-              const url = new URL(calendarsUrl);
-              calendarsUrl = `${url.protocol}//${url.host}/${this.username}/`;
+            } else {
+              // Fall back to current-user-principal
+              const principalMatch = homeText.match(/<d:current-user-principal[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
+              if (principalMatch) {
+                const principalHref = principalMatch[1];
+                if (principalHref.startsWith('/')) {
+                  const url = new URL(calendarsUrl);
+                  calendarsUrl = `${url.protocol}//${url.host}${principalHref}`;
+                } else {
+                  calendarsUrl = principalHref;
+                }
+              } else if (this.username) {
+                // Last fallback: use /<username>/
+                const url = new URL(calendarsUrl);
+                calendarsUrl = `${url.protocol}//${url.host}/${this.username}/`;
+              }
             }
           }
-        }
-      } catch (e) {
-        // If discovery fails, try with username path
-        if (this.username) {
-          const url = new URL(calendarsUrl);
-          calendarsUrl = `${url.protocol}//${url.host}/${this.username}/`;
+        } catch (e) {
+          // If discovery fails, try with username path
+          if (this.username) {
+            const url = new URL(calendarsUrl);
+            calendarsUrl = `${url.protocol}//${url.host}/${this.username}/`;
+          }
         }
       }
       
       // Build PROPFIND request to discover calendars
+      console.log('[CalDAV] PROPFIND on URL:', calendarsUrl);
       const xml = `<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}" xmlns:apple="${NS_ICAL}">
   <d:prop>
@@ -242,12 +299,15 @@ export class CalDAVClient {
       });
 
       if (!response.ok) {
-        console.error('PROPFIND failed for URL', calendarsUrl, ':', await response.text());
+        const errorText = await response.text();
+        console.error('[CalDAV] PROPFIND failed for URL:', calendarsUrl, 'Status:', response.status, errorText);
         throw new Error('Failed to retrieve calendars');
       }
 
       const text = await response.text();
+      console.log('[CalDAV] PROPFIND response length:', text.length);
       const calendars = this.parseCalendarsFromXML(text, calendarsUrl);
+      console.log('[CalDAV] Found calendars:', calendars.map(c => ({ id: c.id, name: c.name })));
       
       return calendars;
     } catch (error) {
@@ -285,6 +345,9 @@ export class CalDAVClient {
         // Check it's a collection (handle self-closing tags)
         const hasCollection = /<(?:[a-z0-9]*:)?collection(?:\s*\/)?>/i.test(resourcetypeContent);
         
+        // Check if this has deleted-calendar (Nextcloud specific, these are still valid shared calendars)
+        const hasDeletedCalendar = /<(?:[a-z0-9]*:)?deleted-calendar[^>]*>/i.test(resourcetypeContent);
+        
         // Check if this is a principal (should be excluded) (handle self-closing tags)
         const hasPrincipal = /<(?:[a-z0-9]*:)?principal(?:\s*\/)?>/i.test(resourcetypeContent);
         
@@ -293,16 +356,16 @@ export class CalDAVClient {
         
 
         
-        // Only include if: has calendar resource, has collection, NOT a principal, NOT an .ics file
-        if (hasCalendarResource && hasCollection && !hasPrincipal && !isIcsFile) {
+        // Only include if: has calendar resource OR deleted-calendar (Nextcloud shared), has collection, NOT a principal, NOT an .ics file
+        if ((hasCalendarResource || hasDeletedCalendar) && hasCollection && !hasPrincipal && !isIcsFile) {
           // Extract properties (handle both prefixed and unprefixed tags)
           // Use non-greedy match across lines for displayname
           const displayNameMatch = responseContent.match(/<(?:[a-z0-9]*:)?displayname[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?displayname>/i);
           const colorMatch = responseContent.match(/<(?:[a-z0-9]*:)?calendar-color[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?calendar-color>/i);
           const descriptionMatch = responseContent.match(/<(?:[a-z0-9]*:)?calendar-description[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?calendar-description>/i);
           
-          // Clean up the href - remove trailing slash and leading slash
-          const cleanHref = href.replace(/^\/+|\/+$/g, '');
+          // Keep leading slash for absolute paths, remove trailing slashes
+          const cleanHref = href.replace(/^\/+/, '/').replace(/\/+$/, '');
           
           // Clean up extracted values - trim whitespace and remove any remaining tags
           const name = displayNameMatch ? displayNameMatch[1].replace(/<[^>]*>/g, '').trim() : cleanHref.split('/').pop() || 'Unnamed Calendar';
@@ -315,6 +378,7 @@ export class CalDAVClient {
             color,
             isShared: responseContent.toLowerCase().includes('shared'),
             canEdit: responseContent.toLowerCase().includes('write') || responseContent.toLowerCase().includes('all'),
+            isDeleted: hasDeletedCalendar,
             description
           });
         }
@@ -337,9 +401,10 @@ export class CalDAVClient {
         const resContent = resourcetypeContent ? resourcetypeContent[1] : '';
         
         // Filter out .ics files, principals, and non-calendar resources
+        // Note: Nextcloud shared calendars may have deleted-calendar instead of calendar tag
         if (/\.ics(\/|$)/i.test(hrefMatch[1])) continue;
         if (/<[a-z0-9]*?:principal/i.test(resContent)) continue;
-        if (!/<[a-z0-9]*?:calendar/i.test(resContent)) continue;
+        if (!/<[a-z0-9]*?:calendar/i.test(resContent) && !/<[a-z0-9]*?:deleted-calendar[^>]*>/i.test(resContent)) continue;
         
         calendars.push({
           id: href,
@@ -601,11 +666,23 @@ export class CalDAVClient {
   </c:filter>
 </c:calendar-query>`;
 
-      // Construct full URL from calendarId (which is a path like /testuser/abc123)
-      let calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      // Construct full URL from calendarId
+      console.log('[CalDAV] getEvents for calendarId:', calendarId);
+      let calendarUrl: string;
+      if (calendarId.startsWith('http')) {
+        calendarUrl = calendarId;
+      } else if (calendarId.startsWith('/')) {
+        // Absolute path - combine with host only
+        const url = new URL(this.config.serverUrl);
+        calendarUrl = `${url.protocol}//${url.host}${calendarId}`;
+      } else {
+        // Relative path
+        calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      }
       if (!calendarUrl.endsWith('/')) {
         calendarUrl += '/';
       }
+      console.log('[CalDAV] Fetching events from URL:', calendarUrl);
       const response = await this.fetchWithAuth(calendarUrl, {
         method: 'REPORT',
         headers: {
@@ -616,12 +693,16 @@ export class CalDAVClient {
       });
 
       if (!response.ok) {
-        console.error('Calendar query failed for URL', calendarUrl, ':', response.status, response.statusText);
+        const errorText = await response.text();
+        console.error('[CalDAV] REPORT failed for URL:', calendarUrl, 'Status:', response.status, errorText);
         return [];
       }
 
       const text = await response.text();
-      return this.parseEventsFromXML(text, calendarId);
+      console.log('[CalDAV] REPORT response length:', text.length);
+      const events = this.parseEventsFromXML(text, calendarId);
+      console.log('[CalDAV] Parsed events:', events.length, 'from calendar:', calendarId);
+      return events;
     } catch (error) {
       console.error('Failed to get events:', error);
       return [];
@@ -642,24 +723,118 @@ export class CalDAVClient {
   }
 
   /**
-   * Parse events from calendar-query response
+   * Parse events from calendar-query response using ICAL.js
+   * The response is a DAV multistatus XML containing calendar-data elements
    */
   private parseEventsFromXML(xml: string, calendarId: string): CalDAVEvent[] {
     const events: CalDAVEvent[] = [];
     
     try {
-      // Parse iCalendar data from the response
-      // This is a simplified parser - in production you'd use a proper iCal parser
+      // First, extract all calendar-data elements from the DAV multistatus response
+      // The response contains one or more <cal:calendar-data> or <d:calendar-data> elements with iCalendar content
+      // Handle different namespace prefixes (cal:, d:, etc.)
+      const calendarDataMatches = xml.match(/<([a-z0-9]*:)?calendar-data[^>]*>([\s\S]*?)<\/\1calendar-data>/gi) || [];
+      
+      for (const match of calendarDataMatches) {
+        // Extract the iCalendar content from the match
+        // Remove the opening and closing tags
+        const icsContent = match.replace(/^<[^>]*>/, '').replace(/<\/[^>]*>$/, '');
+        
+        console.log('[CalDAV] calendar-data content length:', icsContent.length);
+        
+        try {
+          // Parse each iCalendar block with ICAL.js
+          const jcalData = ICAL.parse(icsContent);
+          const vcalendar = new ICAL.Component(jcalData);
+          
+          // Get all VEVENT components from this calendar
+          const vevents = vcalendar.getAllSubcomponents('vevent');
+          
+          for (const vevent of vevents) {
+            const event = new ICAL.Event(vevent);
+            
+            // Get start/end dates as UTC JavaScript Date objects
+            const start = event.startDate.toJSDate();
+            const end = event.endDate ? event.endDate.toJSDate() : start;
+            
+            // Check if this is an all-day event
+            // In ICAL.js, event.startDate is an ICAL.Time object which has isDate property
+            const isAllDay = event.startDate.isDate;
+            
+            console.log('[CalDAV] Event allDay check:', {
+              startDateIsDate: event.startDate.isDate,
+              isAllDay: isAllDay
+            });
+            
+            // Get other properties
+            const uid = vevent.getFirstPropertyValue('uid');
+            const summary = vevent.getFirstPropertyValue('summary');
+            const description = vevent.getFirstPropertyValue('description');
+            const location = vevent.getFirstPropertyValue('location');
+            const rrule = vevent.getFirstPropertyValue('rrule');
+            const color = vevent.getFirstPropertyValue('color');
+            
+            // Only add valid events (with start date)
+            if (!start || isNaN(start.getTime())) {
+              console.warn('[CalDAV] Skipping event with invalid start date');
+              continue;
+            }
+            
+            const caldavEvent: CalDAVEvent = {
+              id: uid || `event-${Date.now()}`,
+              title: summary || 'Untitled Event',
+              start,
+              end: end && !isNaN(end.getTime()) ? end : start,
+              description,
+              location,
+              calendarId,
+              color,
+              isAllDay: isAllDay || false,
+              recurrenceRule: rrule?.toString()
+            };
+            
+            console.log('[CalDAV] Parsed event:', {
+              id: caldavEvent.id,
+              title: caldavEvent.title,
+              start: caldavEvent.start.toISOString(),
+              end: caldavEvent.end.toISOString(),
+              isAllDay: caldavEvent.isAllDay
+            });
+            
+            events.push(caldavEvent);
+          }
+        } catch (e) {
+          console.warn('[CalDAV] ICAL.js parsing failed for a calendar-data block:', e);
+          // Continue with next calendar-data block
+        }
+      }
+    } catch (e) {
+      console.warn('[CalDAV] Error extracting calendar-data, falling back to regex:', e);
+      // Fallback to regex parsing (old method)
+      return this.parseEventsFromXMLFallback(xml, calendarId);
+    }
+    
+    return events;
+  }
+
+  /**
+   * Fallback method using regex parsing (for compatibility)
+   */
+  private parseEventsFromXMLFallback(xml: string, calendarId: string): CalDAVEvent[] {
+    const events: CalDAVEvent[] = [];
+    
+    try {
       const eventStrings = xml.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
       
       for (const eventStr of eventStrings) {
-        const uidMatch = eventStr.match(/UID:(.+?)[\r\n]/);
-        const summaryMatch = eventStr.match(/SUMMARY:(.+?)[\r\n]/);
-        const startMatch = eventStr.match(/DTSTART:(.+?)[\r\n]/);
-        const endMatch = eventStr.match(/DTEND:(.+?)[\r\n]/);
-        const descMatch = eventStr.match(/DESCRIPTION:(.+?)[\r\n]/);
-        const locationMatch = eventStr.match(/LOCATION:(.+?)[\r\n]/);
-        const rruleMatch = eventStr.match(/RRULE:(.+?)[\r\n]/);
+        const unfoldedEventStr = eventStr.replace(/[\r\n]\s+/g, '');
+        const uidMatch = unfoldedEventStr.match(/UID:([\s\S]*?)(?=[A-Z]:|$)/);
+        const summaryMatch = unfoldedEventStr.match(/SUMMARY:([\s\S]*?)(?=[A-Z]:|$)/);
+        const startMatch = unfoldedEventStr.match(/DTSTART:([\s\S]*?)(?=[A-Z]:|$)/);
+        const endMatch = unfoldedEventStr.match(/DTEND:([\s\S]*?)(?=[A-Z]:|$)/);
+        const descMatch = unfoldedEventStr.match(/DESCRIPTION:([\s\S]*?)(?=[A-Z]:|$)/);
+        const locationMatch = unfoldedEventStr.match(/LOCATION:([\s\S]*?)(?=[A-Z]:|$)/);
+        const rruleMatch = unfoldedEventStr.match(/RRULE:([\s\S]*?)(?=[A-Z]:|$)/);
         
         const event: CalDAVEvent = {
           id: uidMatch ? uidMatch[1].trim() : `event-${Date.now()}`,
@@ -670,49 +845,118 @@ export class CalDAVClient {
           location: locationMatch ? locationMatch[1].trim() : undefined,
           calendarId,
           color: undefined,
-          isAllDay: startMatch ? startMatch[1].startsWith(';VALUE=DATE') : false,
+          isAllDay: startMatch ? startMatch[1].includes('VALUE=DATE') : false,
           recurrenceRule: rruleMatch ? rruleMatch[1].trim() : undefined
         };
         
         events.push(event);
       }
     } catch (e) {
-      console.warn('Could not parse events XML:', e);
+      console.warn('[CalDAV] Regex fallback parsing failed:', e);
     }
     
     return events;
   }
 
   /**
-   * Parse iCalendar date string
+   * Parse iCalendar date string (fallback for regex parsing)
    */
   private parseICalDate(dateStr: string): Date {
+    console.log('[CalDAV] Parsing date string (fallback):', dateStr);
+    
+    // Handle VALUE=DATE format (all-day events)
     if (dateStr.startsWith(';VALUE=DATE:')) {
       const datePart = dateStr.substring(';VALUE=DATE:'.length);
       const year = parseInt(datePart.substring(0, 4));
       const month = parseInt(datePart.substring(4, 6)) - 1;
       const day = parseInt(datePart.substring(6, 8));
-      return new Date(Date.UTC(year, month, day));
-    } else if (dateStr.includes('T')) {
-      const datePart = dateStr.replace(/^;VALUE=DATE-TIME:/, '');
-      // Parse ISO 8601 date-time format (YYYYMMDDTHHmmssZ)
-      // If ends with Z, it's UTC
+      const result = new Date(Date.UTC(year, month, day));
+      console.log('[CalDAV] Parsed DATE as:', result.toISOString());
+      return result;
+    } 
+    // Handle VALUE=DATE-TIME format
+    else if (dateStr.startsWith(';VALUE=DATE-TIME:')) {
+      const datePart = dateStr.substring(';VALUE=DATE-TIME:'.length);
       if (datePart.endsWith('Z')) {
         const withoutZ = datePart.slice(0, -1);
-        // Format: YYYYMMDDTHHmmss -> needs to be YYYY-MM-DDTHH:mm:ssZ for Date parsing
         const formatted = `${withoutZ.substring(0, 4)}-${withoutZ.substring(4, 6)}-${withoutZ.substring(6, 8)}T${withoutZ.substring(9, 11)}:${withoutZ.substring(11, 13)}:${withoutZ.substring(13, 15)}Z`;
         return new Date(formatted);
       }
       return new Date(datePart);
-    } else {
+    }
+    // Handle TZID format (e.g., DTSTART;TZID=Europe/Amsterdam:20250107T160000)
+    else if (dateStr.includes('TZID=')) {
+      // Extract the TZID and the date-time
+      const tzidMatch = dateStr.match(/TZID=([^:]+):(.+)/);
+      if (tzidMatch) {
+        const tzid = tzidMatch[1];
+        const datePart = tzidMatch[2];
+        // For Europe/Amsterdam timezone, convert to UTC
+        // CEST (summer): UTC+2, CET (winter): UTC+1
+        // This is a simplified approach - for proper handling we'd need the full timezone definition
+        if (tzid === 'Europe/Amsterdam' && datePart.length >= 15) {
+          const year = parseInt(datePart.substring(0, 4));
+          const month = parseInt(datePart.substring(4, 6)) - 1; // JavaScript months are 0-indexed
+          const day = parseInt(datePart.substring(6, 8));
+          const hour = parseInt(datePart.substring(8, 10)) || 0;
+          const minute = parseInt(datePart.substring(10, 12)) || 0;
+          const second = parseInt(datePart.substring(12, 14)) || 0;
+          
+          // Create the date in the local timezone (Europe/Amsterdam)
+          // Then convert to UTC for storage
+          // For simplicity, assume CEST (UTC+2) during daylight saving time
+          // and CET (UTC+1) during standard time
+          // This is approximate - proper conversion would need the DST rules
+          const localDate = new Date(year, month, day, hour, minute, second);
+          
+          // Determine if DST is in effect (simplified: March to October)
+          const isDST = month >= 2 && month <= 9; // March (2) to October (9)
+          const timezoneOffsetHours = isDST ? 2 : 1; // CEST: +2, CET: +1
+          
+          // Convert from Amsterdam time to UTC by subtracting the offset
+          const utcHours = hour - timezoneOffsetHours;
+          
+          // Create UTC date
+          const utcDate = new Date(Date.UTC(year, month, day, utcHours, minute, second));
+          return utcDate;
+        }
+        // For other timezones, treat as UTC as fallback
+        if (datePart.endsWith('Z')) {
+          const withoutZ = datePart.slice(0, -1);
+          const formatted = `${withoutZ.substring(0, 4)}-${withoutZ.substring(4, 6)}-${withoutZ.substring(6, 8)}T${withoutZ.substring(9, 11)}:${withoutZ.substring(11, 13)}:${withoutZ.substring(13, 15)}Z`;
+          return new Date(formatted);
+        }
+        // Parse as UTC fallback
+        const year = parseInt(datePart.substring(0, 4));
+        const month = parseInt(datePart.substring(4, 6)) - 1;
+        const day = parseInt(datePart.substring(6, 8));
+        const hour = datePart.length >= 15 ? parseInt(datePart.substring(8, 10)) || 0 : 0;
+        const minute = datePart.length >= 15 ? parseInt(datePart.substring(10, 12)) || 0 : 0;
+        const second = datePart.length >= 15 ? parseInt(datePart.substring(12, 14)) || 0 : 0;
+        return new Date(Date.UTC(year, month, day, hour, minute, second));
+      }
+    }
+    // Handle UTC format (ends with Z)
+    else if (dateStr.includes('T') && dateStr.endsWith('Z')) {
+      const withoutZ = dateStr.slice(0, -1).replace(/^;VALUE=DATE-TIME:/, '');
+      const formatted = `${withoutZ.substring(0, 4)}-${withoutZ.substring(4, 6)}-${withoutZ.substring(6, 8)}T${withoutZ.substring(9, 11)}:${withoutZ.substring(11, 13)}:${withoutZ.substring(13, 15)}Z`;
+      return new Date(formatted);
+    }
+    // Handle simple date-time format
+    else if (dateStr.includes('T')) {
+      return new Date(dateStr.replace(/^;VALUE=DATE-TIME:/, ''));
+    }
+    // Fallback: try parsing YYYYMMDD format
+    else if (dateStr.length >= 8) {
       const year = parseInt(dateStr.substring(0, 4));
       const month = parseInt(dateStr.substring(4, 6)) - 1;
       const day = parseInt(dateStr.substring(6, 8));
-      const hour = parseInt(dateStr.substring(9, 11));
-      const minute = parseInt(dateStr.substring(11, 13));
-      const second = parseInt(dateStr.substring(13, 15));
-      return new Date(Date.UTC(year, month, day, hour, minute, second));
+      return new Date(Date.UTC(year, month, day));
     }
+    
+    // If all else fails, return current date
+    console.warn('[CalDAV] Could not parse date string:', dateStr);
+    return new Date();
   }
 
   /**
@@ -784,8 +1028,9 @@ export class CalDAVClient {
    */
   private createICalEvent(eventData: Partial<CalDAVEvent> & { title: string; start: Date; end: Date }): string {
     const uid = eventData.id || `event-${Date.now()}`;
-    // For floating time events (from ICS import without timezone), don't append Z
-    const isFloating = eventData.isAllDay ? false : true;
+    // Always use UTC for non-all-day events to avoid timezone interpretation issues
+    // For all-day events, use DATE format
+    const isFloating = false;
     const startDate = this.formatDateForICal(eventData.start, eventData.isAllDay, isFloating);
     const endDate = this.formatDateForICal(eventData.end, eventData.isAllDay, isFloating);
     const nowDate = this.formatDateForICal(new Date(), false);
@@ -801,6 +1046,23 @@ export class CalDAVClient {
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//NiftyCalendar//EN',
+      'BEGIN:VTIMEZONE',
+      'TZID:Europe/Amsterdam',
+      'BEGIN:DAYLIGHT',
+      'TZOFFSETFROM:+0100',
+      'TZOFFSETTO:+0200',
+      'TZNAME:CEST',
+      'DTSTART:19700329T020000',
+      'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+      'END:DAYLIGHT',
+      'BEGIN:STANDARD',
+      'TZOFFSETFROM:+0200',
+      'TZOFFSETTO:+0100',
+      'TZNAME:CET',
+      'DTSTART:19701025T030000',
+      'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+      'END:STANDARD',
+      'END:VTIMEZONE',
       'BEGIN:VEVENT',
       `UID:${uid}`,
       `DTSTAMP:${nowDate}`,

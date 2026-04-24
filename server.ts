@@ -213,7 +213,7 @@ function getCalDAVClientForUser(userId: number): CalDAVClient {
   // Initialize with user credentials
   if (userRow.auth_method === 'oauth') {
     // For OAuth, use the access token
-    client.initialize(undefined, undefined, userRow.access_token);
+    client.initialize(userRow.email || userRow.caldav_username || 'oauth-user', undefined, userRow.access_token);
   } else {
     // For Basic Auth, decrypt password and use it
     if (userRow.encrypted_password && userRow.encryption_iv) {
@@ -578,7 +578,7 @@ app.get("/api/caldav/calendars", authenticateToken, async (req: any, res) => {
 
     // Initialize client based on auth method
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -631,7 +631,7 @@ app.post("/api/caldav/calendars", authenticateToken, async (req: any, res) => {
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -691,7 +691,7 @@ app.put("/api/caldav/calendars/:calendarId", authenticateToken, async (req: any,
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -733,7 +733,7 @@ app.delete("/api/caldav/calendars/:calendarId", authenticateToken, async (req: a
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -783,7 +783,7 @@ app.post("/api/caldav/import", authenticateToken, async (req: any, res) => {
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -901,7 +901,7 @@ app.get("/api/categories", authenticateToken, async (req: any, res) => {
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -919,7 +919,8 @@ app.get("/api/categories", authenticateToken, async (req: any, res) => {
       isVisible: true,
       isOwner: true,
       canEdit: cal.canEdit || true,
-      isCaldav: true
+      isCaldav: true,
+      isDeleted: cal.isDeleted || false
     }));
 
     res.json(categories);
@@ -953,7 +954,7 @@ app.get("/api/events", authenticateToken, async (req: any, res) => {
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -984,8 +985,8 @@ app.get("/api/events", authenticateToken, async (req: any, res) => {
     // Convert dates to ISO strings for JSON response
     const responseEvents = events.map(e => ({
       ...e,
-      start: e.start.toISOString(),
-      end: e.end.toISOString()
+      start: e.start && !isNaN(e.start.getTime()) ? e.start.toISOString() : new Date().toISOString(),
+      end: e.end && !isNaN(e.end.getTime()) ? e.end.toISOString() : (e.start && !isNaN(e.start.getTime()) ? e.start.toISOString() : new Date().toISOString())
     }));
     
     res.json(responseEvents);
@@ -1016,7 +1017,7 @@ app.post("/api/events", authenticateToken, async (req: any, res) => {
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -1070,7 +1071,7 @@ app.put("/api/events/:id", authenticateToken, async (req: any, res) => {
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
@@ -1122,7 +1123,7 @@ app.delete("/api/events/:id", authenticateToken, async (req: any, res) => {
     });
 
     if (userRow.auth_method === 'oauth') {
-      await client.initialize(undefined, undefined, userRow.access_token);
+      await client.initialize(userRow.email || userRow.caldav_username || req.user?.username || 'oauth-user', undefined, userRow.access_token);
     } else {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
