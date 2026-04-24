@@ -231,7 +231,8 @@ app.get("/api/status", (req, res) => {
     mock: false, 
     type: 'caldav',
     authMethod: CALDAV_AUTH_METHOD,
-    caldavConfigured: !!CALDAV_SERVER_URL
+    caldavConfigured: !!CALDAV_SERVER_URL,
+    caldavServerUrl: CALDAV_SERVER_URL
   });
 });
 
@@ -337,14 +338,14 @@ app.post("/api/auth/login", async (req, res) => {
       }
 
       const token = jwt.sign(
-        { id: userRow.id, email: userRow.email, name: userRow.name, authMethod: 'oauth' },
+        { id: userRow.id, username: userRow.email, name: userRow.name, authMethod: 'oauth' },
         JWT_SECRET
       );
       
       res.json({ 
         user: { 
           id: userRow.id, 
-          email: userRow.email, 
+          username: userRow.email, 
           name: userRow.name,
           authMethod: 'oauth'
         }, 
@@ -441,8 +442,8 @@ app.post("/api/auth/login", async (req, res) => {
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) return res.status(401).json({ error: "Ongeldig wachtwoord" });
 
-  const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET);
-  res.json({ user: { id: user.id, email: user.email, name: user.name }, token });
+  const token = jwt.sign({ id: user.id, username: user.email, name: user.name }, JWT_SECRET);
+  res.json({ user: { id: user.id, username: user.email, name: user.name }, token });
 });
 
 app.post("/api/auth/logout", authenticateToken, (req: any, res) => {
@@ -546,7 +547,7 @@ app.get("/api/caldav/calendars", authenticateToken, async (req: any, res) => {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
         : undefined;
-      await client.initialize(userRow.caldav_username || req.user.email, password);
+      await client.initialize(userRow.caldav_username || req.user.username, password);
     }
 
     const calendars = await client.getCalendars();
@@ -565,6 +566,154 @@ app.get("/api/caldav/calendars", authenticateToken, async (req: any, res) => {
   } catch (err: any) {
     console.error('Failed to get CalDAV calendars:', err);
     res.status(500).json({ error: err.message || 'Failed to retrieve calendars' });
+  }
+});
+
+// Create CalDAV calendar endpoint
+app.post("/api/caldav/calendars", authenticateToken, async (req: any, res) => {
+  try {
+    if (!CALDAV_SERVER_URL || !CALDAV_AUTH_METHOD) {
+      return res.status(503).json({ error: "CalDAV server is niet geconfigureerd" });
+    }
+
+    const { name, color, description } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: "Naam is vereist" });
+    }
+
+    const userRow = db.prepare("SELECT auth_method, encrypted_password, encryption_iv, access_token, caldav_username FROM users WHERE id = ?").get(req.user.id) as any;
+    
+    if (!userRow) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const client = new CalDAVClient({
+      serverUrl: CALDAV_SERVER_URL,
+      authMethod: userRow.auth_method as 'oauth' | 'basic',
+      encryptionKey: ENCRYPTION_KEY
+    });
+
+    if (userRow.auth_method === 'oauth') {
+      await client.initialize(undefined, undefined, userRow.access_token);
+    } else {
+      const password = userRow.encrypted_password && userRow.encryption_iv
+        ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
+        : undefined;
+      await client.initialize(userRow.caldav_username || req.user.username, password);
+    }
+
+    // Create calendar on CalDAV - this returns the CalDAV calendar ID
+    const calendar = await client.createCalendar(name, color, description);
+    
+    // If color was provided but the server might not have set it in MKCALENDAR,
+    // try to update it via PROPPATCH (some servers like Radicale don't support apple:calendar-color in MKCALENDAR)
+    if (color && calendar.color !== color) {
+      try {
+        await client.updateCalendar(calendar.id, { color });
+      } catch (colorErr) {
+        console.warn('Could not set calendar color:', colorErr);
+      }
+    }
+    
+    res.json({
+      id: calendar.id,
+      name: calendar.name,
+      color: calendar.color,
+      description: calendar.description
+    });
+  } catch (err: any) {
+    console.error('Failed to create CalDAV calendar:', err);
+    res.status(503).json({ error: "CalDAV calendar aanmaken mislukt: " + (err.message || String(err)) });
+  }
+});
+
+// Update CalDAV calendar endpoint
+app.put("/api/caldav/calendars/:calendarId", authenticateToken, async (req: any, res) => {
+  try {
+    if (!CALDAV_SERVER_URL || !CALDAV_AUTH_METHOD) {
+      return res.status(503).json({ error: "CalDAV server is niet geconfigureerd" });
+    }
+
+    const { name, color, description } = req.body;
+    const calendarId = req.params.calendarId;
+    
+    if (!name) {
+      return res.status(400).json({ error: "Naam is vereist" });
+    }
+
+    const userRow = db.prepare("SELECT auth_method, encrypted_password, encryption_iv, access_token, caldav_username FROM users WHERE id = ?").get(req.user.id) as any;
+    
+    if (!userRow) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const client = new CalDAVClient({
+      serverUrl: CALDAV_SERVER_URL,
+      authMethod: userRow.auth_method as 'oauth' | 'basic',
+      encryptionKey: ENCRYPTION_KEY
+    });
+
+    if (userRow.auth_method === 'oauth') {
+      await client.initialize(undefined, undefined, userRow.access_token);
+    } else {
+      const password = userRow.encrypted_password && userRow.encryption_iv
+        ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
+        : undefined;
+      await client.initialize(userRow.caldav_username || req.user.username, password);
+    }
+
+    await client.updateCalendar(calendarId, { name, color, description });
+    
+    res.json({
+      success: true,
+      message: "Calendar updated successfully"
+    });
+  } catch (err: any) {
+    console.error('Failed to update CalDAV calendar:', err);
+    res.status(503).json({ error: "CalDAV calendar bijwerken mislukt: " + (err.message || String(err)) });
+  }
+});
+
+// Delete CalDAV calendar endpoint
+app.delete("/api/caldav/calendars/:calendarId", authenticateToken, async (req: any, res) => {
+  try {
+    if (!CALDAV_SERVER_URL || !CALDAV_AUTH_METHOD) {
+      return res.status(503).json({ error: "CalDAV server is niet geconfigureerd" });
+    }
+
+    const calendarId = req.params.calendarId;
+    
+    const userRow = db.prepare("SELECT auth_method, encrypted_password, encryption_iv, access_token, caldav_username FROM users WHERE id = ?").get(req.user.id) as any;
+    
+    if (!userRow) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const client = new CalDAVClient({
+      serverUrl: CALDAV_SERVER_URL,
+      authMethod: userRow.auth_method as 'oauth' | 'basic',
+      encryptionKey: ENCRYPTION_KEY
+    });
+
+    if (userRow.auth_method === 'oauth') {
+      await client.initialize(undefined, undefined, userRow.access_token);
+    } else {
+      const password = userRow.encrypted_password && userRow.encryption_iv
+        ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
+        : undefined;
+      await client.initialize(userRow.caldav_username || req.user.username, password);
+    }
+
+    await client.deleteCalendar(calendarId);
+    
+    res.json({
+      success: true,
+      message: "Calendar deleted successfully"
+    });
+  } catch (err: any) {
+    console.error('Failed to delete CalDAV calendar:', err);
+    res.status(503).json({ error: "CalDAV calendar verwijderen mislukt: " + (err.message || String(err)) });
   }
 });
 
@@ -593,7 +742,7 @@ app.get("/api/categories", authenticateToken, async (req: any, res) => {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
         : undefined;
-      await client.initialize(userRow.caldav_username || req.user.email, password);
+      await client.initialize(userRow.caldav_username || req.user.username, password);
     }
 
     const calendars = await client.getCalendars();
@@ -645,7 +794,7 @@ app.get("/api/events", authenticateToken, async (req: any, res) => {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
         : undefined;
-      await client.initialize(userRow.caldav_username || req.user.email, password);
+      await client.initialize(userRow.caldav_username || req.user.username, password);
     }
 
     // If calendarId is provided, get events from that specific calendar
@@ -708,7 +857,7 @@ app.post("/api/events", authenticateToken, async (req: any, res) => {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
         : undefined;
-      await client.initialize(userRow.caldav_username || req.user.email, password);
+      await client.initialize(userRow.caldav_username || req.user.username, password);
     }
 
     // Create event on CalDAV - calendarId is the CalDAV calendar id (e.g., "testuser/uuid")
@@ -762,7 +911,7 @@ app.put("/api/events/:id", authenticateToken, async (req: any, res) => {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
         : undefined;
-      await client.initialize(userRow.caldav_username || req.user.email, password);
+      await client.initialize(userRow.caldav_username || req.user.username, password);
     }
 
     // calendarId from request body is the CalDAV calendar id
@@ -814,7 +963,7 @@ app.delete("/api/events/:id", authenticateToken, async (req: any, res) => {
       const password = userRow.encrypted_password && userRow.encryption_iv
         ? forgeDecrypt(userRow.encrypted_password, userRow.encryption_iv, ENCRYPTION_KEY)
         : undefined;
-      await client.initialize(userRow.caldav_username || req.user.email, password);
+      await client.initialize(userRow.caldav_username || req.user.username, password);
     }
 
     // calendarId can come from query param, body, or other field names

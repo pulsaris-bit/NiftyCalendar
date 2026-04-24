@@ -35,6 +35,7 @@ export default function App() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isMockMode, setIsMockMode] = React.useState(false);
   const [caldavConfigured, setCaldavConfigured] = React.useState(false);
+  const [caldavServerUrl, setCaldavServerUrl] = React.useState('');
   const [authMethod, setAuthMethod] = React.useState<'oauth' | 'basic' | null>(null);
   const [isSyncing, setIsSyncing] = React.useState(false);
 
@@ -68,6 +69,7 @@ export default function App() {
       const data = await res.json();
       setIsMockMode(data.mock);
       setCaldavConfigured(!!data.caldavConfigured);
+      setCaldavServerUrl(data.caldavServerUrl || '');
       if (data.authMethod) {
         setAuthMethod(data.authMethod as 'oauth' | 'basic');
       }
@@ -218,30 +220,10 @@ export default function App() {
     );
   }
 
-  const handleToggleCategory = async (id: string) => {
-    const category = categories.find(c => c.id === id);
-    if (!category) return;
-
-    const updatedCategory = { ...category, isVisible: !category.isVisible };
-    
-    try {
-      const headers = { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      };
-      
-      const res = await fetch(`/api/categories/${id}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify(updatedCategory)
-      });
-
-      if (res.ok) {
-        setCategories(prev => prev.map(cat => cat.id === id ? updatedCategory : cat));
-      }
-    } catch (err) {
-      toast.error("Kon categorie niet bijwerken");
-    }
+  const handleToggleCategory = (id: string) => {
+    setCategories(prev => prev.map(cat => 
+      cat.id === id ? { ...cat, isVisible: !cat.isVisible } : cat
+    ));
   };
 
   const handleAddEvent = () => {
@@ -385,13 +367,7 @@ export default function App() {
         onViewChange={setView}
         onToday={() => setCurrentDate(startOfToday())}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-        user={user}
-        onLogout={handleLogout}
-        onSettings={() => setIsSettingsOpen(true)}
         isMockMode={isMockMode}
-        isSyncing={isSyncing}
-        onSync={handleSync}
-        caldavConfigured={caldavConfigured}
       />
       
       <div className="flex flex-1 overflow-hidden relative">
@@ -427,8 +403,6 @@ export default function App() {
               setIsSettingsOpen(true);
               if (window.innerWidth < 1024) setIsSidebarOpen(false);
             }}
-            onSync={handleSync}
-            isSyncing={isSyncing}
           />
         </div>
         
@@ -492,6 +466,8 @@ export default function App() {
               }}
               onClose={() => setIsSettingsOpen(false)} 
               token={token}
+              username={user?.name || user?.email || ''}
+              caldavServerUrl={caldavServerUrl}
             />
           </div>
         </div>

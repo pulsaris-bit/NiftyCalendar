@@ -383,6 +383,64 @@ export class CalDAVClient {
   }
 
   /**
+   * Discover calendar home set URL
+   */
+  private async discoverCalendarHomeUrl(): Promise<string> {
+    // Try to discover the calendar home set
+    try {
+      const homeResponse = await this.fetchWithAuth(this.config.serverUrl, {
+        method: 'PROPFIND',
+        headers: {
+          'Content-Type': 'application/xml',
+          'Depth': '0'
+        },
+        body: `<?xml version="1.0" encoding="utf-8" ?>
+<d:propfind xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}">
+  <d:prop>
+    <c:calendar-home-set/>
+    <d:current-user-principal/>
+  </d:prop>
+</d:propfind>`
+      });
+
+      if (homeResponse.ok) {
+        const homeText = await homeResponse.text();
+        // Try calendar-home-set first
+        const calendarHomeMatch = homeText.match(/<c:calendar-home-set[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
+        if (calendarHomeMatch) {
+          const homeHref = calendarHomeMatch[1];
+          if (homeHref.startsWith('/')) {
+            const url = new URL(this.config.serverUrl);
+            return `${url.protocol}//${url.host}${homeHref}`;
+          }
+          return homeHref;
+        }
+        // Fall back to current-user-principal
+        const principalMatch = homeText.match(/<d:current-user-principal[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
+        if (principalMatch) {
+          const principalHref = principalMatch[1];
+          if (principalHref.startsWith('/')) {
+            const url = new URL(this.config.serverUrl);
+            return `${url.protocol}//${url.host}${principalHref}`;
+          }
+          return principalHref;
+        }
+      }
+    } catch (e) {
+      // Ignore discovery errors
+    }
+
+    // Fallback: use username path if available
+    if (this.username) {
+      const url = new URL(this.config.serverUrl);
+      return `${url.protocol}//${url.host}/${this.username}/`;
+    }
+
+    // Ultimate fallback: use server URL directly
+    return this.config.serverUrl;
+  }
+
+  /**
    * Create a new calendar
    */
   async createCalendar(name: string, color?: string, description?: string): Promise<CalDAVCalendar> {
@@ -391,23 +449,27 @@ export class CalDAVClient {
     }
 
     try {
-      const baseUrl = this.config.serverUrl;
-      const calendarId = `${baseUrl}/${encodeURIComponent(name)}`;
+      // Discover the calendar home URL
+      const calendarHomeUrl = await this.discoverCalendarHomeUrl();
       
-      // MKCALENDAR request
+      // Ensure calendar home URL ends with /
+      const baseUrl = calendarHomeUrl.endsWith('/') ? calendarHomeUrl : calendarHomeUrl + '/';
+      const encodedName = encodeURIComponent(name);
+      const calendarPath = `${baseUrl}${encodedName}`;
+      
+      // MKCALENDAR request - only use standard CalDAV properties
+      // Note: apple:calendar-color is proprietary and may not be supported by all servers
       const xml = `<?xml version="1.0" encoding="utf-8" ?>
 <c:mkcalendar xmlns:c="${NS_CALDAV}" xmlns:d="${NS_DAV}">
   <d:set>
     <d:prop>
       <d:displayname>${name}</d:displayname>
       <c:calendar-description>${description || ''}</c:calendar-description>
-      <apple:calendar-color xmlns:apple="${NS_ICAL}">${color || '#3b82f6'}</apple:calendar-color>
     </d:prop>
   </d:set>
 </c:mkcalendar>`;
 
-      // Construct full URL from calendarId
-      const calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      const calendarUrl = new URL(calendarPath).toString();
       const response = await this.fetchWithAuth(calendarUrl, {
         method: 'MKCALENDAR',
         headers: {
@@ -417,8 +479,14 @@ export class CalDAVClient {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to create calendar: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error(`MKCALENDAR failed for URL ${calendarUrl}: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(`Failed to create calendar: ${response.statusText} - ${errorText}`);
       }
+
+      // Extract the path part from calendarUrl for the ID (remove protocol and host)
+      const urlObj = new URL(calendarUrl);
+      const calendarId = urlObj.pathname.replace(/^\/+/g, '');
 
       return {
         id: calendarId,
@@ -455,6 +523,47 @@ export class CalDAVClient {
     } catch (error) {
       console.error('Failed to delete calendar:', error);
       throw new Error('Failed to delete calendar from CalDAV server');
+    }
+  }
+
+  /**
+   * Update a calendar
+   */
+  async updateCalendar(calendarId: string, updates: { name?: string; color?: string; description?: string }): Promise<void> {
+    if (!this.authenticated) {
+      throw new Error('Client not initialized');
+    }
+
+    try {
+      // Construct full URL from calendarId
+      const calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      
+      // PROPPATCH request to update calendar properties
+      const xml = `<?xml version="1.0" encoding="utf-8" ?>
+<d:propertyupdate xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}" xmlns:apple="${NS_ICAL}">
+  <d:set>
+    <d:prop>
+      ${updates.name ? `<d:displayname>${updates.name}</d:displayname>` : ''}
+      ${updates.description ? `<c:calendar-description>${updates.description}</c:calendar-description>` : ''}
+      ${updates.color ? `<apple:calendar-color xmlns:apple="${NS_ICAL}">${updates.color}</apple:calendar-color>` : ''}
+    </d:prop>
+  </d:set>
+</d:propertyupdate>`;
+
+      const response = await this.fetchWithAuth(calendarUrl, {
+        method: 'PROPPATCH',
+        headers: {
+          'Content-Type': 'application/xml'
+        },
+        body: xml
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to update calendar: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Failed to update calendar:', error);
+      throw new Error('Failed to update calendar on CalDAV server');
     }
   }
 

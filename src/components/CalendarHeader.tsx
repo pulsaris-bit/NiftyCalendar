@@ -9,19 +9,14 @@ import {
   ChevronRight, 
   Menu, 
   Search, 
-  Settings, 
   HelpCircle,
-  Calendar as CalendarIcon,
-  Bell,
-  RefreshCw
+  Calendar as CalendarIcon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CalendarView } from '../types';
 import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfWeek, endOfWeek, isSameMonth } from 'date-fns';
 import { nl } from 'date-fns/locale';
 import { Input } from '@/components/ui/input';
-import { toast } from 'sonner';
-import { notificationService } from '@/src/lib/notificationService';
 
 import { 
   DropdownMenu,
@@ -37,13 +32,7 @@ interface CalendarHeaderProps {
   onViewChange: (view: CalendarView) => void;
   onToday: () => void;
   onToggleSidebar: () => void;
-  user: { name: string; email: string; authMethod?: 'oauth' | 'basic' } | null;
-  onLogout: () => void;
-  onSettings: () => void;
   isMockMode?: boolean;
-  isSyncing?: boolean;
-  onSync?: () => void;
-  caldavConfigured?: boolean;
 }
 
 export function CalendarHeader({
@@ -53,13 +42,7 @@ export function CalendarHeader({
   onViewChange,
   onToday,
   onToggleSidebar,
-  user,
-  onLogout,
-  onSettings,
-  isMockMode = false,
-  isSyncing = false,
-  onSync,
-  caldavConfigured = false
+  isMockMode = false
 }: CalendarHeaderProps) {
   const handlePrev = () => {
     if (view === 'month' || view === 'agenda') onNavigate(subMonths(currentDate, 1));
@@ -101,9 +84,6 @@ export function CalendarHeader({
             </span>
             {isMockMode && (
               <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded font-bold w-fit leading-none py-0.5 ml-0 md:ml-0.5">MOCK</span>
-            )}
-            {caldavConfigured && (
-              <span className="text-[8px] bg-green-100 text-green-700 px-1 rounded font-bold w-fit leading-none py-0.5 ml-0 md:ml-0.5">CalDAV</span>
             )}
           </div>
         </div>
@@ -162,85 +142,17 @@ export function CalendarHeader({
           />
           <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-gray-400 group-focus-within:text-[#C36322] transition-colors" />
         </div>
-
-        <div className="flex items-center gap-0 sm:gap-1 shrink-0 ml-auto">
-          {/* CalDAV Sync Button - show if configured and user is logged in */}
-          {caldavConfigured && user && onSync && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-gray-400 h-9 w-9 hidden sm:flex shrink-0"
-              onClick={onSync}
-              disabled={isSyncing}
-            >
-              <RefreshCw className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
-            </Button>
-          )}
-
-          <div className="lg:hidden shrink-0">
-            <DropdownMenu>
-              <DropdownMenuTrigger className="text-gray-400 h-9 w-8 sm:w-9 hover:bg-slate-100 rounded-md flex items-center justify-center transition-all outline-none">
-                <CalendarIcon className="h-5 w-5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => onViewChange('day')} className={view === 'day' ? 'bg-slate-50 font-bold' : ''}>Dag</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onViewChange('week')} className={view === 'week' ? 'bg-slate-50 font-bold' : ''}>Week</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onViewChange('month')} className={view === 'month' ? 'bg-slate-50 font-bold' : ''}>Maand</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onViewChange('agenda')} className={view === 'agenda' ? 'bg-slate-50 font-bold' : ''}>Agenda</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="text-gray-400 h-9 w-9 hidden sm:flex shrink-0"
-            onClick={async () => {
-              const granted = await notificationService.requestPermission();
-              if (granted) {
-                toast.success("Bureaubladmeldingen ingeschakeld");
-              } else {
-                toast.error("Meldingen zijn geweigerd door de browser");
-              }
-            }}
-          >
-            <Bell className="h-5 w-5" />
-          </Button>
-          <Button variant="ghost" size="icon" className="text-gray-400 h-9 w-9 hidden sm:flex shrink-0" onClick={onSettings}>
-            <Settings className="h-5 w-5" />
-          </Button>
-          
+        
+        <div className="lg:hidden shrink-0 ml-auto">
           <DropdownMenu>
-            <DropdownMenuTrigger className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[10px] sm:text-xs font-extrabold text-slate-600 ml-1 sm:ml-2 hover:ring-2 hover:ring-[#C36322]/20 transition-all outline-none shrink-0">
-              {user?.name.split(' ').map(n => n[0]).join('').toUpperCase() || 'SJ'}
+            <DropdownMenuTrigger className="text-gray-400 h-9 w-8 sm:w-9 hover:bg-slate-100 rounded-md flex items-center justify-center transition-all outline-none">
+              <CalendarIcon className="h-5 w-5" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 p-2 rounded-xl shadow-xl border-gray-100">
-              <div className="px-2 py-2 mb-2">
-                <p className="text-sm font-bold text-slate-800">{user?.name}</p>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{user?.email}</p>
-                {user?.authMethod && (
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Auth: {user.authMethod === 'oauth' ? 'Nextcloud OAuth' : 'Basic Auth'}
-                  </p>
-                )}
-              </div>
-              <DropdownMenuItem 
-                className="rounded-lg text-sm font-medium focus:bg-gray-50 focus:text-[#C36322] cursor-pointer"
-                onClick={onSettings}
-              >
-                Instellingen
-              </DropdownMenuItem>
-              {caldavConfigured && onSync && (
-                <DropdownMenuItem 
-                  className="rounded-lg text-sm font-medium focus:bg-gray-50 focus:text-[#C36322] cursor-pointer"
-                  onClick={onSync}
-                >
-                  Nu synchroniseren
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem className="rounded-lg text-sm font-medium focus:bg-gray-50 focus:text-[#C36322] cursor-pointer text-red-500 focus:text-red-600" onClick={onLogout}>
-                Uitloggen
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onViewChange('day')} className={view === 'day' ? 'bg-slate-50 font-bold' : ''}>Dag</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onViewChange('week')} className={view === 'week' ? 'bg-slate-50 font-bold' : ''}>Week</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onViewChange('month')} className={view === 'month' ? 'bg-slate-50 font-bold' : ''}>Maand</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onViewChange('agenda')} className={view === 'agenda' ? 'bg-slate-50 font-bold' : ''}>Agenda</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

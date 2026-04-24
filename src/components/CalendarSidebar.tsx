@@ -4,7 +4,7 @@
  */
 
 import * as React from 'react';
-import { Plus, Calendar as CalendarIcon, Check, Settings, HelpCircle, ChevronLeft, ChevronRight, LogOut, RefreshCw } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, Settings, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarCategory } from '@/src/types';
@@ -22,8 +22,6 @@ interface CalendarSidebarProps {
   onAddEvent: () => void;
   onLogout: () => void;
   onSettings: () => void;
-  onSync?: () => void;
-  isSyncing?: boolean;
 }
 
 export function CalendarSidebar({
@@ -33,9 +31,7 @@ export function CalendarSidebar({
   onDateChange,
   onAddEvent,
   onLogout,
-  onSettings,
-  onSync,
-  isSyncing = false
+  onSettings
 }: CalendarSidebarProps) {
   const [viewMonth, setViewMonth] = React.useState(selectedDate);
 
@@ -55,20 +51,6 @@ export function CalendarSidebar({
             <Plus className="h-4 w-4 mr-2" />
             <span className="text-sm">Afspraak maken</span>
           </Button>
-          
-          {/* Sync Button - show if configured */}
-          {onSync && (
-            <Button
-              onClick={onSync}
-              variant="outline"
-              size="icon"
-              className="h-10 w-10 border-0 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white transition-all"
-              disabled={isSyncing}
-              title="Synchroniseren met CalDAV"
-            >
-              <RefreshCw className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
-            </Button>
-          )}
         </div>
       </div>
 
@@ -98,12 +80,17 @@ export function CalendarSidebar({
           locale={nl}
           className="rounded-md border-0 bg-transparent p-0 scale-[0.9] origin-top -mt-2"
           classNames={{
-            day_selected: "bg-[#C36322] text-white hover:bg-[#C36322] hover:text-white focus:bg-[#C36322] focus:text-white rounded-full",
-            day_today: "bg-stone-800 text-stone-100 rounded-full font-bold",
+            day_selected: "bg-[#C36322] text-white rounded-full",
+            day_today: "bg-[#C36322] text-stone-900 rounded-full font-bold",
             head_cell: "text-stone-600 font-bold text-[10px] uppercase w-8 h-8",
-            day: "h-8 w-8 text-xs p-0 font-normal text-stone-400 aria-selected:opacity-100 hover:bg-stone-800 hover:text-stone-200 rounded-full",
+            day: "h-8 w-8 text-xs p-0 font-normal text-stone-400 aria-selected:opacity-100 hover:bg-stone-800 hover:text-stone-200 rounded-full transition-colors",
             nav: "hidden",
             table: "w-full border-collapse space-y-1",
+          }}
+          modifiersStyles={{
+            today: {
+              selected: 'bg-white text-[#C36322] font-bold',
+            }
           }}
         />
       </div>
@@ -125,6 +112,7 @@ export function CalendarSidebar({
                     <Checkbox 
                       id={category.id} 
                       checked={category.isVisible} 
+                      onCheckedChange={() => onToggleCategory(category.id)}
                       className="w-4 h-4 rounded text-[#C36322] border-stone-700 bg-stone-900"
                     />
                     <div className="w-3 h-3 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: category.color }} />
@@ -134,12 +122,6 @@ export function CalendarSidebar({
                     >
                       {category.name}
                     </label>
-                    {category.isCaldav && (
-                      <span className="text-[8px] bg-green-600/20 text-green-400 px-1 rounded font-bold">CalDAV</span>
-                    )}
-                    {category.syncEnabled === false && (
-                      <span className="text-[8px] bg-amber-600/20 text-amber-400 px-1 rounded font-bold">Lokaal</span>
-                    )}
                   </div>
                 </div>
               ))}
@@ -174,6 +156,7 @@ export function CalendarSidebar({
           </Button>
         </div>
       </div>
+
     </aside>
   );
 }
