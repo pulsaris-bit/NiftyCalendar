@@ -311,8 +311,43 @@ app.post("/api/auth/login", async (req, res) => {
     try {
       const tokens = await oauthClient.exchangeCode(code, state);
       
+      // Get user info from Nextcloud using the access token
+      // Extract base URL from CALDAV_SERVER_URL (remove /remote.php/dav/calendars path)
+      const baseUrl = CALDAV_SERVER_URL.replace(/\/remote\.php\/dav\/calendars.*$/, '');
+      
+      // Try multiple userinfo endpoints (Nextcloud variations)
+      const endpoints = [
+        `${baseUrl}/ocs/v2.php/openapi/v1/connect/userinfo`,
+        `${baseUrl}/ocs/v2.php/apps/oauth2/api/v1/userinfo`
+      ];
+      
+      let userInfoResponse = null;
+      for (const endpoint of endpoints) {
+        userInfoResponse = await fetch(endpoint, {
+          headers: {
+            'Authorization': `Bearer ${tokens.accessToken}`
+          }
+        });
+        if (userInfoResponse.ok) break;
+      }
+      
+      let userEmail = 'oauth-user@nextcloud';
+      let userName = 'Nextcloud User';
+      
+      if (userInfoResponse.ok) {
+        try {
+          const userInfo = await userInfoResponse.json();
+          // Handle both OCS wrapped and direct OpenID responses
+          const data = userInfo.ocs?.data || userInfo;
+          userEmail = data.email || data.sub || userEmail;
+          userName = data.name || data.display_name || data.preferred_username || userName;
+        } catch (e) {
+          console.error('Failed to parse user info:', e);
+        }
+      }
+      
       // Check if user exists, create if not
-      let userRow = db.prepare('SELECT id, email, name FROM users WHERE email = ? OR caldav_username = ?').get(email, email) as any;
+      let userRow = db.prepare('SELECT id, email, name FROM users WHERE email = ? OR caldav_username = ?').get(userEmail, userEmail) as any;
       
       if (!userRow) {
         // Create new user with OAuth
@@ -320,15 +355,15 @@ app.post("/api/auth/login", async (req, res) => {
           INSERT INTO users (email, name, password_hash, auth_method, access_token, refresh_token, token_expires)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(
-          email,
-          email.split('@')[0], // Use email prefix as name
+          userEmail,
+          userName,
           '', // No password hash for OAuth
           'oauth',
           tokens.accessToken,
           tokens.refreshToken,
           new Date(tokens.expiresAt * 1000).toISOString()
         );
-        userRow = { id: result.lastInsertRowid, email, name: email.split('@')[0] };
+        userRow = { id: result.lastInsertRowid, email: userEmail, name: userName };
       } else {
         // Update existing user with new tokens
         db.prepare(`
