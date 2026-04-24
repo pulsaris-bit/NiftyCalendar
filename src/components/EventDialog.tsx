@@ -47,7 +47,7 @@ export function EventDialog({
   const [formData, setFormData] = React.useState<Partial<CalendarEvent>>({
     title: '',
     start: new Date(),
-    end: new Date(),
+    end: new Date(Date.now() + 60 * 60 * 1000), // Default: 1 hour duration
     calendarId: categories[0]?.id || '',
     description: '',
     location: '',
@@ -105,37 +105,101 @@ export function EventDialog({
 
             <div className="flex flex-col gap-3">
               <div className="flex items-start gap-3 text-gray-600">
-                <Clock className="h-5 w-5 shrink-0 mt-2" />
+                <CalendarIcon className="h-5 w-5 shrink-0 mt-2" />
                 <div className="flex flex-1 flex-col gap-3">
-                  <div className="w-full">
-                    <Input 
-                      type="date" 
-                      className="h-9 text-sm w-full bg-white border-gray-200 focus-visible:ring-[#C36322]"
-                      value={formData.start ? format(formData.start, 'yyyy-MM-dd') : ''}
-                      onChange={(e) => {
-                        const dateStr = e.target.value;
-                        if (!dateStr) return;
-                        const [year, month, day] = dateStr.split('-').map(Number);
-                        const newStart = new Date(formData.start || new Date());
-                        newStart.setFullYear(year, month - 1, day);
-                        
-                        const newEnd = new Date(formData.end || new Date());
-                        newEnd.setFullYear(year, month - 1, day);
-                        
-                        // Ensure duration is preserved or at least end is after start
-                        if (newEnd <= newStart) {
-                          newEnd.setTime(newStart.getTime() + 60 * 60 * 1000);
-                        }
-                        
-                        setFormData({ ...formData, start: newStart, end: newEnd });
-                      }}
-                      disabled={!canEdit}
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] uppercase font-bold text-gray-400">Startdatum</Label>
+                      <Input 
+                        type="date" 
+                        className="h-9 text-sm w-full bg-white border-gray-200 focus-visible:ring-[#C36322]"
+                        value={formData.start ? format(formData.start, 'yyyy-MM-dd') : ''}
+                        onChange={(e) => {
+                          const dateStr = e.target.value;
+                          if (!dateStr) return;
+                          const [year, month, day] = dateStr.split('-').map(Number);
+                          const newStart = new Date(formData.start || new Date());
+                          newStart.setFullYear(year, month - 1, day);
+                          
+                          let newEnd = formData.end ? new Date(formData.end) : new Date();
+                          newEnd.setFullYear(year, month - 1, day);
+                          
+                          // If end was on a different date, keep it on that date
+                          // Otherwise ensure it's on or after start date
+                          if (formData.end) {
+                            const originalEnd = new Date(formData.end);
+                            if (originalEnd.getFullYear() !== newStart.getFullYear() ||
+                                originalEnd.getMonth() !== newStart.getMonth() ||
+                                originalEnd.getDate() !== newStart.getDate()) {
+                              // End was on a different date, try to preserve the date
+                              const endDate = new Date(originalEnd);
+                              endDate.setFullYear(year, month - 1, day);
+                              if (endDate >= newStart) {
+                                newEnd = endDate;
+                              } else {
+                                newEnd = new Date(newStart);
+                                newEnd.setTime(newStart.getTime() + 60 * 60 * 1000);
+                              }
+                            } else {
+                              // End was on same date, ensure it's after start
+                              if (newEnd <= newStart) {
+                                newEnd = new Date(newStart.getTime() + 60 * 60 * 1000);
+                              }
+                            }
+                          } else {
+                            // No end set, default to start + 1 hour
+                            newEnd = new Date(newStart.getTime() + 60 * 60 * 1000);
+                          }
+                          
+                          setFormData({ ...formData, start: newStart, end: newEnd });
+                        }}
+                        disabled={!canEdit}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] uppercase font-bold text-gray-400">Einddatum</Label>
+                      <Input 
+                        type="date" 
+                        className="h-9 text-sm w-full bg-white border-gray-200 focus-visible:ring-[#C36322]"
+                        value={formData.end ? format(formData.end, 'yyyy-MM-dd') : ''}
+                        onChange={(e) => {
+                          const dateStr = e.target.value;
+                          if (!dateStr) return;
+                          const [year, month, day] = dateStr.split('-').map(Number);
+                          const newEnd = new Date();
+                          newEnd.setFullYear(year, month - 1, day);
+                          
+                          // If end date is before start date, set it to start date
+                          if (formData.start) {
+                            const startDate = new Date(formData.start);
+                            startDate.setHours(0, 0, 0, 0);
+                            newEnd.setHours(0, 0, 0, 0);
+                            
+                            if (newEnd < startDate) {
+                              // Set end date to start date
+                              const startYear = formData.start.getFullYear();
+                              const startMonth = formData.start.getMonth();
+                              const startDay = formData.start.getDate();
+                              newEnd.setFullYear(startYear, startMonth, startDay);
+                              
+                              // If end time is before start time on the same day, set to start + 1 hour
+                              const startHours = formData.start.getHours();
+                              const startMinutes = formData.start.getMinutes();
+                              newEnd.setHours(Math.max(startHours + 1, newEnd.getHours()), startMinutes, 0, 0);
+                            }
+                          }
+                          
+                          setFormData({ ...formData, end: newEnd });
+                        }}
+                        min={formData.start ? format(formData.start, 'yyyy-MM-dd') : ''}
+                        disabled={!canEdit}
+                      />
+                    </div>
                   </div>
                   
                   {!formData.isAllDay && (
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 flex items-center gap-2">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center gap-2">
                         <Label className="text-[10px] uppercase font-bold text-gray-400 w-10 shrink-0">Van</Label>
                         <Input 
                           type="time" 
@@ -145,20 +209,29 @@ export function EventDialog({
                             const [hours, minutes] = e.target.value.split(':');
                             if (formData.start) {
                               const date = new Date(formData.start);
-                              date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-                              
-                              let newEnd = formData.end ? new Date(formData.end) : new Date(date.getTime() + 60 * 60 * 1000);
-                              if (newEnd <= date) {
-                                newEnd = new Date(date.getTime() + 60 * 60 * 1000);
+                              date.setHours(parseInt(hours) || 0, parseInt(minutes) || 0, 0, 0);
+                              setFormData({ ...formData, start: date });
+                            }
+                          }}
+                          onBlur={(e) => {
+                            if (!formData.start || !formData.end) return;
+                            const startDate = new Date(formData.start);
+                            const endDate = new Date(formData.end);
+                            
+                            // Update end time if it's on the same day and now before start
+                            if (endDate.getDate() === startDate.getDate() &&
+                                endDate.getMonth() === startDate.getMonth() &&
+                                endDate.getFullYear() === startDate.getFullYear()) {
+                              if (endDate < startDate) {
+                                const newEnd = new Date(startDate.getTime() + 60 * 60 * 1000);
+                                setFormData({ ...formData, end: newEnd });
                               }
-                              
-                              setFormData({ ...formData, start: date, end: newEnd });
                             }
                           }}
                           disabled={!canEdit}
                         />
                       </div>
-                      <div className="flex-1 flex items-center gap-2">
+                      <div className="flex items-center gap-2">
                         <Label className="text-[10px] uppercase font-bold text-gray-400 w-10 shrink-0 text-center">Tot</Label>
                         <Input 
                           type="time" 
@@ -168,14 +241,30 @@ export function EventDialog({
                             const [hours, minutes] = e.target.value.split(':');
                             if (formData.end) {
                               const date = new Date(formData.end);
-                              date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-                              
-                              // If user sets end time before start time, assume it's the next day
-                              if (formData.start && date <= formData.start) {
-                                date.setDate(date.getDate() + 1);
-                              }
-                              
+                              date.setHours(parseInt(hours) || 0, parseInt(minutes) || 0, 0, 0);
                               setFormData({ ...formData, end: date });
+                            }
+                          }}
+                          onBlur={(e) => {
+                            if (!formData.start || !formData.end) return;
+                            const startDate = new Date(formData.start);
+                            const endDate = new Date(formData.end);
+                            
+                            // Fix end date if it's before start
+                            if (endDate < startDate) {
+                              // If end is before start on same day, move to next day
+                              if (endDate.getDate() === startDate.getDate() &&
+                                  endDate.getMonth() === startDate.getMonth() &&
+                                  endDate.getFullYear() === startDate.getFullYear()) {
+                                const newEnd = new Date(endDate);
+                                newEnd.setDate(newEnd.getDate() + 1);
+                                setFormData({ ...formData, end: newEnd });
+                              } else {
+                                // If end is on different day but still before start, set to start + 1 hour
+                                const newEnd = new Date(startDate);
+                                newEnd.setHours(startDate.getHours() + 1, startDate.getMinutes(), 0, 0);
+                                setFormData({ ...formData, end: newEnd });
+                              }
                             }
                           }}
                           disabled={!canEdit}
@@ -200,12 +289,11 @@ export function EventDialog({
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id} disabled={cat.canEdit === false}>
+                  {categories.filter(cat => cat.canEdit !== false && !cat.isDeleted).map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-2 rounded-full" style={{ backgroundColor: cat.color }} />
                         <span className="truncate">{cat.name}</span>
-                        {cat.canEdit === false && <span className="text-[10px] text-gray-400 ml-auto">(alleen lezen)</span>}
                       </div>
                     </SelectItem>
                   ))}

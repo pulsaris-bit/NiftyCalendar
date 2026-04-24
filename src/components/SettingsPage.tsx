@@ -338,15 +338,17 @@ export function SettingsPage({
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => handleDeleteCategory(cat.id)}
-                        className="h-9 w-9 text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all shrink-0"
-                        disabled={localCategories.length <= 1 || !cat.isOwner}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {cat.isOwner && !cat.id.includes('_shared_by_') && (
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => handleDeleteCategory(cat.id)}
+                          className="h-9 w-9 text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all shrink-0"
+                          disabled={localCategories.length <= 1}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </motion.div>
                 ))}
