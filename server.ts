@@ -281,7 +281,7 @@ app.get("/api/auth/oauth/callback", async (req, res) => {
     
     // Store tokens in session and redirect back to app
     // The frontend will handle storing the tokens
-    res.redirect(`${APP_URL}/auth/oauth?code=${encodeURIComponent(code)}&state=${encodeURIComponent(storedState || '')}`);
+    res.redirect(`${APP_URL}/auth/oauth?code=${code}&state=${storedState || ''}`);
   } catch (err: any) {
     console.error('OAuth callback error:', err);
     res.redirect(`${APP_URL}/auth?error=${encodeURIComponent(err.message || 'OAuth failed')}`);
