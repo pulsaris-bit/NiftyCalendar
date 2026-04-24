@@ -7,12 +7,10 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Calendar, Mail, Lock, User as UserIcon, ArrowRight, Loader2, AlertCircle, ExternalLink } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
+import { Calendar, Lock, User as UserIcon, ArrowRight, Loader2, ExternalLink } from 'lucide-react';
+import { motion } from 'motion/react';
 import { toast } from 'sonner';
-import type { CalendarCategory } from '@/src/types';
 
 interface User {
   id: number;
@@ -67,22 +65,18 @@ export function AuthPage({ onLogin }: AuthPageProps) {
     checkConfig();
   }, []);
 
-  const handleBasicAuthSubmit = async (e: React.FormEvent<HTMLFormElement>, type: 'login' | 'signup') => {
+  const handleBasicAuthSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     
     const formData = new FormData(e.currentTarget);
-    const email = type === 'login' ? formData.get('email') : formData.get('signup-email');
-    const password = type === 'login' ? formData.get('password') : formData.get('signup-password');
-    const name = formData.get('name');
+    const username = formData.get('username');
+    const password = formData.get('password');
 
     try {
-      const endpoint = type === 'login' ? '/api/auth/login' : '/api/auth/register';
-      const body = type === 'login' 
-        ? { email, password, authMethod: 'basic' } 
-        : { email, name, password, authMethod: 'basic' };
+      const body = { username, password, authMethod: 'basic' };
 
-      const response = await fetch(endpoint, {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -240,126 +234,59 @@ export function AuthPage({ onLogin }: AuthPageProps) {
               </Button>
             </div>
           ) : (
-            // Basic Auth or both
-            <Tabs defaultValue={authMethod === 'oauth' ? 'oauth' : 'login'} className="w-full">
-              <TabsList className="grid w-full grid-cols-2 rounded-none h-12 bg-gray-50/50 border-b border-gray-100">
-                <TabsTrigger value="login" className="text-xs font-bold uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:text-[#C36322] transition-all">Inloggen</TabsTrigger>
-                <TabsTrigger value="signup" className="text-xs font-bold uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:text-[#C36322] transition-all">Registreren</TabsTrigger>
-              </TabsList>
-              
-              <CardContent className="pt-8 pb-6 px-8">
-                <TabsContent value="login" className="mt-0">
-                  <form onSubmit={(e) => handleBasicAuthSubmit(e, 'login')} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">E-mailadres</Label>
-                      <div className="relative group">
-                        <Input 
-                          id="email" 
-                          name="email"
-                          type="email" 
-                          placeholder="name@company.com" 
-                          required 
-                          className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
-                        />
-                        <Mail className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-300 group-focus-within:text-[#C36322] transition-colors" />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="password" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Wachtwoord</Label>
-                        <a href="#" className="text-[10px] font-bold uppercase text-[#C36322] hover:underline">Vergeten?</a>
-                      </div>
-                      <div className="relative group">
-                        <Input 
-                          id="password" 
-                          name="password"
-                          type="password" 
-                          required 
-                          className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
-                        />
-                        <Lock className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-300 group-focus-within:text-[#C36322] transition-colors" />
-                      </div>
-                    </div>
-                    <Button 
-                      type="submit" 
-                      className="w-full h-11 bg-[#C36322] hover:bg-[#a6541d] text-white font-bold transition-all active:scale-[0.98] mt-2 group"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                      ) : (
-                        <>
-                          Inloggen
-                          <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                        </>
-                      )}
-                    </Button>
-                  </form>
-                </TabsContent>
-
-                <TabsContent value="signup" className="mt-0">
-                  <form onSubmit={(e) => handleBasicAuthSubmit(e, 'signup')} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="name" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Volledige naam</Label>
-                      <div className="relative group">
-                        <Input 
-                          id="name" 
-                          name="name"
-                          placeholder="John Doe" 
-                          required 
-                          className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
-                        />
-                        <UserIcon className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-300 group-focus-within:text-[#C36322] transition-colors" />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-email" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">E-mailadres</Label>
-                      <div className="relative group">
-                        <Input 
-                          id="signup-email" 
-                          name="signup-email"
-                          type="email" 
-                          placeholder="name@company.com" 
-                          required 
-                          className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
-                        />
-                        <Mail className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-300 group-focus-within:text-[#C36322] transition-colors" />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-password" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Wachtwoord</Label>
-                      <div className="relative group">
-                        <Input 
-                          id="signup-password" 
-                          name="signup-password"
-                          type="password" 
-                          required 
-                          className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
-                        />
-                        <Lock className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-300 group-focus-within:text-[#C36322] transition-colors" />
-                      </div>
-                    </div>
-                    <Button 
-                      type="submit" 
-                      className="w-full h-11 bg-[#C36322] hover:bg-[#a6541d] text-white font-bold transition-all active:scale-[0.98] mt-2 group"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                      ) : (
-                        <>
-                          Account aanmaken
-                          <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                        </>
-                      )}
-                    </Button>
-                  </form>
-                </TabsContent>
-              </CardContent>
+            // Basic Auth only - no registration tab
+            <div className="p-8">
+              <form onSubmit={(e) => handleBasicAuthSubmit(e, 'login')} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Gebruikersnaam</Label>
+                  <div className="relative group">
+                    <Input 
+                      id="username" 
+                      name="username"
+                      type="text" 
+                      placeholder="Gebruikersnaam" 
+                      required 
+                      autoComplete="username"
+                      className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
+                    />
+                    <UserIcon className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-300 group-focus-within:text-[#C36322] transition-colors" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password" className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Wachtwoord</Label>
+                    <a href="#" className="text-[10px] font-bold uppercase text-[#C36322] hover:underline">Vergeten?</a>
+                  </div>
+                  <div className="relative group">
+                    <Input 
+                      id="password" 
+                      name="password"
+                      type="password" 
+                      required 
+                      className="pl-10 h-11 border-gray-100 bg-gray-50/30 focus-visible:ring-[#C36322]"
+                    />
+                    <Lock className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-300 group-focus-within:text-[#C36322] transition-colors" />
+                  </div>
+                </div>
+                <Button 
+                  type="submit" 
+                  className="w-full h-11 bg-[#C36322] hover:bg-[#a6541d] text-white font-bold transition-all active:scale-[0.98] mt-2 group"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  ) : (
+                    <>
+                      Inloggen
+                      <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
+                </Button>
+              </form>
               
               {/* OAuth option for Basic Auth mode */}
               {caldavConfig?.authMethod === 'basic' && (
-                <CardFooter className="flex justify-center pt-0 pb-6">
+                <CardFooter className="flex justify-center pt-4 pb-0">
                   <p className="text-xs text-gray-500">
                     Of log in via CalDAV server 
                     <Button 
@@ -372,7 +299,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                   </p>
                 </CardFooter>
               )}
-            </Tabs>
+            </div>
           )}
         </Card>
 

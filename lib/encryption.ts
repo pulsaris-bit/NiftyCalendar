@@ -6,12 +6,14 @@
 import forge from 'node-forge';
 
 // Ensure encryption key is exactly 32 bytes for AES-256
+// Returns base64-encoded key for use with forge.util.decode64
 function normalizeEncryptionKey(key: string): string {
-  // If key is base64 encoded, decode it first
+  // If key is base64 encoded, validate it decodes to 32 bytes
   try {
     const decoded = Buffer.from(key, 'base64');
     if (decoded.length === 32) {
-      return decoded.toString('binary');
+      // Key is already valid base64 encoding of 32 bytes, return as-is
+      return key;
     }
   } catch (e) {
     // Not base64, use as-is
@@ -21,11 +23,12 @@ function normalizeEncryptionKey(key: string): string {
   if (key.length === 64 && /^[0-9a-fA-F]+$/.test(key)) {
     const hexBuffer = Buffer.from(key, 'hex');
     if (hexBuffer.length === 32) {
-      return hexBuffer.toString('binary');
+      // Convert hex to base64 for forge compatibility
+      return Buffer.from(hexBuffer).toString('base64');
     }
   }
   
-  // If key is a plain string, hash it to 32 bytes
+  // If key is a plain string, hash it to 32 bytes and return as base64
   const md = forge.md.sha256.create();
   md.update(key);
   const hash = md.digest();

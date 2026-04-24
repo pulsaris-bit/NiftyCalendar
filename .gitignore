@@ -6,7 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
-
+radicale/
 # Database
 data/
 *.db

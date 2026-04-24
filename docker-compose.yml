@@ -8,7 +8,7 @@ services:
     environment:
       - JWT_SECRET=${JWT_SECRET:-default-secret-key-123}
       - CALDAV_AUTH_METHOD=${CALDAV_AUTH_METHOD:-basic}
-      - CALDAV_SERVER_URL=${CALDAV_SERVER_URL:-https://your-caldav-server.com/caldav}
+      - CALDAV_SERVER_URL=${CALDAV_SERVER_URL:-http://radicale:5232/caldav}
       - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
       - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
       - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/api/auth/oauth/callback}
@@ -18,3 +18,24 @@ services:
       - APP_URL=${APP_URL:-http://localhost:3000}
     volumes:
       - ./data:/app/data
+    depends_on:
+      - radicale
+    networks:
+      - caldav_net
+      
+  radicale:
+    image: tomsquest/docker-radicale:latest
+    container_name: radicale
+    restart: unless-stopped
+    ports:
+      - "5232:5232"
+    volumes:
+      - ./radicale_data:/data
+      - ./radicale/config:/config
+    networks:
+      - caldav_net
+
+networks:
+  caldav_net:
+    driver: bridge
+

@@ -159,49 +159,90 @@ export class CalDAVClient {
     }
 
     try {
-      // For Nextcloud: /remote.php/dav/calendars/<username>/
-      // For Radicale: typically at the root or /<username>/calendars/
-      const calendarsUrl = this.config.serverUrl;
+      // First, discover the calendar home set
+      // For Radicale: PROPFIND / with Depth:0 to get calendar-home-set
+      // For Nextcloud: the serverUrl might already point to the calendar home
+      let calendarsUrl = this.config.serverUrl;
+      
+      // Try to discover calendar-home-set first
+      try {
+        const homeResponse = await this.fetchWithAuth(calendarsUrl, {
+          method: 'PROPFIND',
+          headers: {
+            'Content-Type': 'application/xml',
+            'Depth': '0'
+          },
+          body: `<?xml version="1.0" encoding="utf-8" ?>
+<d:propfind xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}">
+  <d:prop>
+    <c:calendar-home-set/>
+    <d:current-user-principal/>
+  </d:prop>
+</d:propfind>`
+        });
+
+        if (homeResponse.ok) {
+          const homeText = await homeResponse.text();
+          // Try calendar-home-set first
+          const calendarHomeMatch = homeText.match(/<c:calendar-home-set[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
+          if (calendarHomeMatch) {
+            const homeHref = calendarHomeMatch[1];
+            // If it's a relative URL, prepend the base
+            if (homeHref.startsWith('/')) {
+              const url = new URL(calendarsUrl);
+              calendarsUrl = `${url.protocol}//${url.host}${homeHref}`;
+            } else {
+              calendarsUrl = homeHref;
+            }
+          } else {
+            // Fall back to current-user-principal
+            const principalMatch = homeText.match(/<d:current-user-principal[^>]*><d:href[^>]*>([^<]+)<\/d:href>/);
+            if (principalMatch) {
+              const principalHref = principalMatch[1];
+              if (principalHref.startsWith('/')) {
+                const url = new URL(calendarsUrl);
+                calendarsUrl = `${url.protocol}//${url.host}${principalHref}`;
+              } else {
+                calendarsUrl = principalHref;
+              }
+            } else if (this.username) {
+              // Last fallback: use /<username>/
+              const url = new URL(calendarsUrl);
+              calendarsUrl = `${url.protocol}//${url.host}/${this.username}/`;
+            }
+          }
+        }
+      } catch (e) {
+        // If discovery fails, try with username path
+        if (this.username) {
+          const url = new URL(calendarsUrl);
+          calendarsUrl = `${url.protocol}//${url.host}/${this.username}/`;
+        }
+      }
       
       // Build PROPFIND request to discover calendars
       const xml = `<?xml version="1.0" encoding="utf-8" ?>
-<d:searchxml xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}">
-  <d:basicsearch>
-    <d:select>
-      <d:prop>
-        <d:displayname/>
-        <c:calendar-description/>
-        <apple:calendar-color xmlns:apple="${NS_ICAL}"/>
-      </d:prop>
-    </d:select>
-    <d:from>
-      <d:scope>
-        <d:href>${calendarsUrl}</d:href>
-        <d:depth>1</d:depth>
-      </d:scope>
-    </d:from>
-    <d:where>
-      <d:and>
-        <d:propfilter name="d:resourcetype">
-          <d:prop>
-            <c:calendar xmlns:c="${NS_CALDAV}"/>
-          </d:prop>
-        </d:propfilter>
-      </d:and>
-    </d:where>
-  </d:basicsearch>
-</d:searchxml>`;
+<d:propfind xmlns:d="${NS_DAV}" xmlns:c="${NS_CALDAV}" xmlns:apple="${NS_ICAL}">
+  <d:prop>
+    <d:displayname/>
+    <d:resourcetype/>
+    <c:calendar-description/>
+    <apple:calendar-color/>
+    <c:supported-calendar-component-set/>
+  </d:prop>
+</d:propfind>`;
 
       const response = await this.fetchWithAuth(calendarsUrl, {
-        method: 'SEARCH',
+        method: 'PROPFIND',
         headers: {
-          'Content-Type': 'application/xml'
+          'Content-Type': 'application/xml',
+          'Depth': '1'
         },
         body: xml
       });
 
       if (!response.ok) {
-        console.error('PROPFIND failed:', await response.text());
+        console.error('PROPFIND failed for URL', calendarsUrl, ':', await response.text());
         throw new Error('Failed to retrieve calendars');
       }
 
@@ -219,32 +260,115 @@ export class CalDAVClient {
    * Parse calendars from PROPFIND response
    */
   private parseCalendarsFromXML(xml: string, baseUrl: string): CalDAVCalendar[] {
-    // Simple XML parsing - in production you'd use a proper XML parser
     const calendars: CalDAVCalendar[] = [];
     
-    // Try to parse the response
     try {
-      // This is a placeholder - actual parsing depends on server response format
-      // For now, return a default calendar
-      calendars.push({
-        id: `${baseUrl}/calendar`,
-        name: 'Main Calendar',
-        color: '#3b82f6',
-        isShared: false,
-        canEdit: true,
-        description: undefined
-      });
+      // Match all calendar responses in the multistatus (handle namespaced tags like d:response or just response)
+      const calendarRegex = /<(?:[a-z0-9]*:)?response[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?response>/g;
+      let match;
+      
+      while ((match = calendarRegex.exec(xml)) !== null) {
+        const responseContent = match[1];
+        
+        // Extract href from response content
+        const hrefMatch = responseContent.match(/<(?:[a-z0-9]*:)?href[^>]*>([^<]+)<\/(?:[a-z0-9]*:)?href>/i);
+        if (!hrefMatch) continue;
+        const href = hrefMatch[1];
+        
+        // Extract the full resourcetype content for precise checking
+        const resourcetypeMatch = responseContent.match(/<(?:[a-z0-9]*:)?resourcetype[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?resourcetype>/i);
+        const resourcetypeContent = resourcetypeMatch ? resourcetypeMatch[1] : '';
+        
+        // Check if this has calendar in resourcetype (handle self-closing tags)
+        const hasCalendarResource = /<(?:[a-z0-9]*:)?calendar(?:\s*\/)?>/i.test(resourcetypeContent);
+        
+        // Check it's a collection (handle self-closing tags)
+        const hasCollection = /<(?:[a-z0-9]*:)?collection(?:\s*\/)?>/i.test(resourcetypeContent);
+        
+        // Check if this is a principal (should be excluded) (handle self-closing tags)
+        const hasPrincipal = /<(?:[a-z0-9]*:)?principal(?:\s*\/)?>/i.test(resourcetypeContent);
+        
+        // Filter out .ics files (these are events mistakenly created as collections)
+        const isIcsFile = /\.ics(\/|$)/i.test(href);
+        
+
+        
+        // Only include if: has calendar resource, has collection, NOT a principal, NOT an .ics file
+        if (hasCalendarResource && hasCollection && !hasPrincipal && !isIcsFile) {
+          // Extract properties (handle both prefixed and unprefixed tags)
+          // Use non-greedy match across lines for displayname
+          const displayNameMatch = responseContent.match(/<(?:[a-z0-9]*:)?displayname[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?displayname>/i);
+          const colorMatch = responseContent.match(/<(?:[a-z0-9]*:)?calendar-color[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?calendar-color>/i);
+          const descriptionMatch = responseContent.match(/<(?:[a-z0-9]*:)?calendar-description[^>]*>([\s\S]*?)<\/(?:[a-z0-9]*:)?calendar-description>/i);
+          
+          // Clean up the href - remove trailing slash and leading slash
+          const cleanHref = href.replace(/^\/+|\/+$/g, '');
+          
+          // Clean up extracted values - trim whitespace and remove any remaining tags
+          const name = displayNameMatch ? displayNameMatch[1].replace(/<[^>]*>/g, '').trim() : cleanHref.split('/').pop() || 'Unnamed Calendar';
+          const color = colorMatch ? colorMatch[1].replace(/<[^>]*>/g, '').trim() : '#3b82f6';
+          const description = descriptionMatch ? descriptionMatch[1].replace(/<[^>]*>/g, '').trim() : undefined;
+          
+          calendars.push({
+            id: cleanHref,
+            name,
+            color,
+            isShared: responseContent.toLowerCase().includes('shared'),
+            canEdit: responseContent.toLowerCase().includes('write') || responseContent.toLowerCase().includes('all'),
+            description
+          });
+        }
+      }
+      
+      // If we found calendars, return them
+      if (calendars.length > 0) {
+        return calendars;
+      }
+      
+      // Fallback: try to find any collection with calendar resourcetype
+      const collectionRegex = /<[a-z0-9]*?:response[^>]*>[\s\S]*?<[a-z0-9]*?:href[^>]*>([^<]+)<\/[a-z0-9]*?:href>[\s\S]*?<[a-z0-9]*?:resourcetype[^>]*>([\s\S]*?)<\/[a-z0-9]*?:resourcetype>/gi;
+      const collectionMatches = xml.match(collectionRegex) || [];
+      
+      for (const collectionMatch of collectionMatches) {
+        const hrefMatch = collectionMatch.match(/<[a-z0-9]*?:href[^>]*>([^<]+)<\/[a-z0-9]*?:href>/i);
+        if (!hrefMatch) continue;
+        const href = hrefMatch[1].replace(/^\/+|\/+$/g, '');
+        const resourcetypeContent = collectionMatch.match(/<[a-z0-9]*?:resourcetype[^>]*>([\s\S]*?)<\/[a-z0-9]*?:resourcetype>/i);
+        const resContent = resourcetypeContent ? resourcetypeContent[1] : '';
+        
+        // Filter out .ics files, principals, and non-calendar resources
+        if (/\.ics(\/|$)/i.test(hrefMatch[1])) continue;
+        if (/<[a-z0-9]*?:principal/i.test(resContent)) continue;
+        if (!/<[a-z0-9]*?:calendar/i.test(resContent)) continue;
+        
+        calendars.push({
+          id: href,
+          name: href.split('/').pop() || 'Unnamed Calendar',
+          color: '#3b82f6',
+          isShared: false,
+          canEdit: true,
+          description: undefined
+        });
+      }
+      
+      if (calendars.length > 0) {
+        return calendars;
+      }
     } catch (e) {
-      console.warn('Could not parse calendar XML, returning default:', e);
-      calendars.push({
-        id: `${baseUrl}/calendar`,
-        name: 'Main Calendar',
-        color: '#3b82f6',
-        isShared: false,
-        canEdit: true,
-        description: undefined
-      });
+      console.warn('Could not parse calendar XML:', e);
     }
+    
+    // Last resort: return a default calendar based on the base URL
+    console.warn('Could not parse calendars from XML, returning default calendar for URL:', baseUrl);
+    calendars.push({
+      id: `${baseUrl}calendar`,
+      name: 'Main Calendar',
+      color: '#3b82f6',
+      isShared: false,
+      canEdit: true,
+      description: undefined
+    });
+    
     
     return calendars;
   }
@@ -282,7 +406,9 @@ export class CalDAVClient {
   </d:set>
 </c:mkcalendar>`;
 
-      const response = await this.fetchWithAuth(calendarId, {
+      // Construct full URL from calendarId
+      const calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      const response = await this.fetchWithAuth(calendarUrl, {
         method: 'MKCALENDAR',
         headers: {
           'Content-Type': 'application/xml'
@@ -317,7 +443,9 @@ export class CalDAVClient {
     }
 
     try {
-      const response = await this.fetchWithAuth(calendarId, {
+      // Construct full URL from calendarId
+      const calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      const response = await this.fetchWithAuth(calendarUrl, {
         method: 'DELETE'
       });
 
@@ -361,7 +489,12 @@ export class CalDAVClient {
   </c:filter>
 </c:calendar-query>`;
 
-      const response = await this.fetchWithAuth(calendarId, {
+      // Construct full URL from calendarId (which is a path like /testuser/abc123)
+      let calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      if (!calendarUrl.endsWith('/')) {
+        calendarUrl += '/';
+      }
+      const response = await this.fetchWithAuth(calendarUrl, {
         method: 'REPORT',
         headers: {
           'Content-Type': 'application/xml',
@@ -371,7 +504,7 @@ export class CalDAVClient {
       });
 
       if (!response.ok) {
-        console.error('Calendar query failed:', await response.text());
+        console.error('Calendar query failed for URL', calendarUrl, ':', response.status, response.statusText);
         return [];
       }
 
@@ -449,7 +582,15 @@ export class CalDAVClient {
       const day = parseInt(datePart.substring(6, 8));
       return new Date(Date.UTC(year, month, day));
     } else if (dateStr.includes('T')) {
-      const datePart = dateStr.replace(/^;VALUE=DATE-TIME:/, '').replace(/Z$/, '');
+      const datePart = dateStr.replace(/^;VALUE=DATE-TIME:/, '');
+      // Parse ISO 8601 date-time format (YYYYMMDDTHHmmssZ)
+      // If ends with Z, it's UTC
+      if (datePart.endsWith('Z')) {
+        const withoutZ = datePart.slice(0, -1);
+        // Format: YYYYMMDDTHHmmss -> needs to be YYYY-MM-DDTHH:mm:ssZ for Date parsing
+        const formatted = `${withoutZ.substring(0, 4)}-${withoutZ.substring(4, 6)}-${withoutZ.substring(6, 8)}T${withoutZ.substring(9, 11)}:${withoutZ.substring(11, 13)}:${withoutZ.substring(13, 15)}Z`;
+        return new Date(formatted);
+      }
       return new Date(datePart);
     } else {
       const year = parseInt(dateStr.substring(0, 4));
@@ -464,9 +605,14 @@ export class CalDAVClient {
 
   /**
    * Get a specific event
+   * Uses a broader date range to find the event if it's outside the current month
    */
   async getEvent(calendarId: string, eventId: string): Promise<CalDAVEvent | null> {
-    const events = await this.getEvents(calendarId);
+    // Try with a broad date range (1 year)
+    const now = new Date();
+    const startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    const endDate = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
+    const events = await this.getEvents(calendarId, startDate, endDate);
     const event = events.find(e => e.id === eventId);
     return event || null;
   }
@@ -484,7 +630,14 @@ export class CalDAVClient {
       const filename = `${eventId}.ics`;
       const icalEvent = this.createICalEvent(eventData);
       
-      const response = await this.fetchWithAuth(`${calendarId}/${filename}`, {
+      // Construct full URL from calendarId and filename
+      // Ensure calendarUrl ends with / to avoid URL resolution issues
+      let calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      if (!calendarUrl.endsWith('/')) {
+        calendarUrl += '/';
+      }
+      const eventUrl = new URL(filename, calendarUrl).toString();
+      const response = await this.fetchWithAuth(eventUrl, {
         method: 'PUT',
         headers: {
           'Content-Type': 'text/calendar; charset=utf-8'
@@ -521,6 +674,7 @@ export class CalDAVClient {
     const uid = eventData.id || `event-${Date.now()}`;
     const startDate = this.formatDateForICal(eventData.start, eventData.isAllDay);
     const endDate = this.formatDateForICal(eventData.end, eventData.isAllDay);
+    const nowDate = this.formatDateForICal(new Date(), false);
     
     const lines = [
       'BEGIN:VCALENDAR',
@@ -528,6 +682,7 @@ export class CalDAVClient {
       'PRODID:-//NiftyCalendar//EN',
       'BEGIN:VEVENT',
       `UID:${uid}`,
+      `DTSTAMP:${nowDate}`,
       `DTSTART:${startDate}`,
       `DTEND:${endDate}`,
       `SUMMARY:${this.escapeICalText(eventData.title)}`,
@@ -605,7 +760,15 @@ export class CalDAVClient {
       const icalEvent = this.createICalEvent(updatedEventData);
       const filename = `${eventId}.ics`;
       
-      const response = await this.fetchWithAuth(`${calendarId}/${filename}`, {
+      // Construct full URL from calendarId and filename
+      let calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      if (!calendarUrl.endsWith('/')) {
+        calendarUrl += '/';
+      }
+      const eventUrl = new URL(filename, calendarUrl).toString();
+      console.log(`[DEBUG] Updating event at ${eventUrl}`);
+      console.log(`[DEBUG] iCal content: ${icalEvent.substring(0, 200)}...`);
+      const response = await this.fetchWithAuth(eventUrl, {
         method: 'PUT',
         headers: {
           'Content-Type': 'text/calendar; charset=utf-8'
@@ -614,6 +777,8 @@ export class CalDAVClient {
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Failed to update event at ${eventUrl}: ${response.status} ${response.statusText} - ${errorText}`);
         throw new Error(`Failed to update event: ${response.statusText}`);
       }
 
@@ -640,7 +805,13 @@ export class CalDAVClient {
 
     try {
       const filename = `${eventId}.ics`;
-      const response = await this.fetchWithAuth(`${calendarId}/${filename}`, {
+      // Construct full URL from calendarId and filename
+      let calendarUrl = new URL(calendarId, this.config.serverUrl).toString();
+      if (!calendarUrl.endsWith('/')) {
+        calendarUrl += '/';
+      }
+      const eventUrl = new URL(filename, calendarUrl).toString();
+      const response = await this.fetchWithAuth(eventUrl, {
         method: 'DELETE'
       });
 

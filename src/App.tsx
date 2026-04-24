@@ -312,11 +312,11 @@ export default function App() {
     }
   };
 
-  const handleDeleteEvent = async (id: string) => {
+  const handleDeleteEvent = async (id: string, calendarId: string) => {
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
       
-      const res = await fetch(`/api/events/${id}`, {
+      const res = await fetch(`/api/events/${id}?calendarId=${encodeURIComponent(calendarId)}`, {
         method: 'DELETE',
         headers
       });
