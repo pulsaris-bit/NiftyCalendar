@@ -119,8 +119,8 @@ export function AuthPage({ onLogin }: AuthPageProps) {
         throw new Error(data.error || 'Failed to get OAuth authorization URL');
       }
       
-      // Redirect to OAuth provider
-      window.location.href = data.authorizationUrl;
+      // Open OAuth in new window/tab
+      window.open(data.authorizationUrl, '_blank', 'width=600,height=800');
     } catch (err: any) {
       toast.error(err.message);
       setIsLoading(false);
