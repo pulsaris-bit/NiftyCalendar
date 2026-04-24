@@ -33,7 +33,7 @@ interface EventDialogProps {
   event: Partial<CalendarEvent> | null;
   categories: CalendarCategory[];
   onSave: (event: Partial<CalendarEvent>) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string, calendarId: string) => void;
 }
 
 export function EventDialog({
@@ -249,7 +249,7 @@ export function EventDialog({
                 type="button" 
                 variant="ghost" 
                 className="text-red-600 hover:bg-red-50"
-                onClick={() => onDelete(event.id!)}
+                onClick={() => onDelete(event.id!, formData.calendarId)}
               >
                 Verwijderen
               </Button>

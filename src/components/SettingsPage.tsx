@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CalendarCategory, CalendarEvent } from '@/src/types';
-import { Plus, Trash2, Check, X, Palette, ChevronRight, Layout, Clock, Calendar as CalendarIcon, Upload, Users, UserPlus, Bell } from 'lucide-react';
+import { Plus, Trash2, Check, X, Palette, ChevronRight, Layout, Clock, Calendar as CalendarIcon, Upload, Bell, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { 
@@ -24,9 +24,9 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'motion/react';
-import ICAL from 'ical.js';
 import { toast } from 'sonner';
 import { notificationService } from '@/src/lib/notificationService';
+import { Button } from '@/components/ui/button';
 
 interface SettingsPageProps {
   categories: CalendarCategory[];
@@ -42,6 +42,8 @@ interface SettingsPageProps {
   onImportEvents: (events: CalendarEvent[]) => void;
   onClose: () => void;
   token: string | null;
+  username: string;
+  caldavServerUrl: string;
 }
 
 export function SettingsPage({ 
@@ -57,80 +59,16 @@ export function SettingsPage({
   onUpdateCategories, 
   onImportEvents,
   onClose,
-  token
+  token,
+  username,
+  caldavServerUrl
 }: SettingsPageProps) {
   const [localCategories, setLocalCategories] = React.useState<CalendarCategory[]>(categories);
   const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [sharingId, setSharingId] = React.useState<string | null>(null);
-  const [shares, setShares] = React.useState<any[]>([]);
-  const [shareUsername, setShareUsername] = React.useState("");
-  const [shareCanEdit, setShareCanEdit] = React.useState(false);
-  const [isSharingLoading, setIsSharingLoading] = React.useState(false);
   const [importTargetCalendarId, setImportTargetCalendarId] = React.useState<string>(defaultCalendarId);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  React.useEffect(() => {
-    if (sharingId && token) {
-      fetchShares(sharingId);
-    }
-  }, [sharingId]);
 
-  const fetchShares = async (id: string) => {
-    try {
-      const res = await fetch(`/api/categories/${id}/shares`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setShares(data);
-      }
-    } catch (err) {
-      console.error("Failed to fetch shares", err);
-    }
-  };
-
-  const handleShare = async () => {
-    if (!sharingId || !shareUsername || !token) return;
-    setIsSharingLoading(true);
-    try {
-      const res = await fetch(`/api/categories/${sharingId}/share`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ username: shareUsername, canEdit: shareCanEdit })
-      });
-      if (res.ok) {
-        toast.success(`Gedeeld met ${shareUsername}`);
-        setShareUsername("");
-        fetchShares(sharingId);
-      } else {
-        const data = await res.json();
-        toast.error(data.error || "Delen mislukt");
-      }
-    } catch (err) {
-      toast.error("Fout bij delen");
-    } finally {
-      setIsSharingLoading(false);
-    }
-  };
-
-  const handleUnshare = async (userId: number) => {
-    if (!sharingId || !token) return;
-    try {
-      const res = await fetch(`/api/categories/${sharingId}/share/${userId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        toast.success("Toegang ingetrokken");
-        fetchShares(sharingId);
-      }
-    } catch (err) {
-      toast.error("Fout bij intrekken");
-    }
-  };
 
   const colors = [
     '#C36322', // Nifty Orange
@@ -154,71 +92,152 @@ export function SettingsPage({
     '#166534', // Dark Green
   ];
 
-  const handleAddCategory = () => {
-    const newCategory: CalendarCategory = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: 'Nieuwe Agenda',
-      color: colors[Math.floor(Math.random() * colors.length)],
-      isVisible: true,
-    };
-    const updated = [...localCategories, newCategory];
-    setLocalCategories(updated);
-    setEditingId(newCategory.id);
+  const handleAddCategory = async () => {
+    // Generate a random color
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    const newCategoryName = 'Nieuwe Agenda';
+    
+    try {
+      const response = await fetch('/api/caldav/calendars', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: newCategoryName,
+          color: randomColor
+        })
+      });
+      
+      if (response.ok) {
+        const newCalendar = await response.json();
+        // Add the new calendar to local state
+        const updated = [...localCategories, {
+          id: newCalendar.id,
+          name: newCalendar.name,
+          color: newCalendar.color,
+          isVisible: true,
+          canEdit: true,
+          isOwner: true,
+          isCaldav: true
+        }];
+        setLocalCategories(updated);
+        setEditingId(newCalendar.id);
+        toast.success('Agenda aangemaakt op CalDAV server');
+      } else {
+        const data = await response.json();
+        toast.error(data.error || 'Fout bij aanmaken agenda');
+      }
+    } catch (err) {
+      toast.error('Fout bij verbinden met CalDAV server');
+    }
   };
 
-  const handleUpdateCategory = (id: string, updates: Partial<CalendarCategory>) => {
+  const handleUpdateCategory = async (id: string, updates: Partial<CalendarCategory>) => {
+    // Optimistic update for UI
     const updated = localCategories.map(cat => 
       cat.id === id ? { ...cat, ...updates } : cat
     );
     setLocalCategories(updated);
+    
+    // Send update to CalDAV server
+    try {
+      const response = await fetch(`/api/caldav/calendars/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: updates.name,
+          color: updates.color,
+          description: updates.description
+        })
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        toast.error(data.error || 'Fout bij bijwerken agenda');
+        // Revert optimistic update
+        setLocalCategories(localCategories);
+      } else {
+        toast.success('Agenda bijgewerkt');
+      }
+    } catch (err) {
+      toast.error('Fout bij verbinden met CalDAV server');
+      setLocalCategories(localCategories);
+    }
   };
 
-  const handleDeleteCategory = (id: string) => {
-    if (localCategories.length <= 1) return; // Keep at least one
-    const updated = localCategories.filter(cat => cat.id !== id);
-    setLocalCategories(updated);
+  const handleDeleteCategory = async (id: string) => {
+    if (localCategories.length <= 1) {
+      toast.error('Je moet minstens 1 agenda hebben');
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/caldav/calendars/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        const updated = localCategories.filter(cat => cat.id !== id);
+        setLocalCategories(updated);
+        toast.success('Agenda verwijderd');
+      } else {
+        const data = await response.json();
+        toast.error(data.error || 'Fout bij verwijderen agenda');
+      }
+    } catch (err) {
+      toast.error('Fout bij verbinden met CalDAV server');
+    }
   };
 
   const handleSave = () => {
-    onUpdateCategories(localCategories);
+    // No need to call onUpdateCategories since we're updating directly to CalDAV
     onClose();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !token) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const icsData = event.target?.result as string;
-        const jcalData = ICAL.parse(icsData);
-        const vcalendar = new ICAL.Component(jcalData);
-        const vevents = vcalendar.getAllSubcomponents('vevent');
         
-        const importedEvents: CalendarEvent[] = vevents.map(vevent => {
-          const icalEvent = new ICAL.Event(vevent);
-          return {
-            id: Math.random().toString(36).substr(2, 9),
-            title: icalEvent.summary || 'Naamloze afspraak',
-            start: icalEvent.startDate.toJSDate(),
-            end: icalEvent.endDate.toJSDate(),
-            description: icalEvent.description || '',
-            location: icalEvent.location || '',
+        // Send to CalDAV server for import
+        const response = await fetch('/api/caldav/import', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
             calendarId: importTargetCalendarId,
-            isAllDay: icalEvent.startDate.isDate,
-          };
+            icsFile: icsData
+          })
         });
 
-        if (importedEvents.length > 0) {
-          onImportEvents(importedEvents);
-          toast.success(`${importedEvents.length} afspraken succesvol geïmporteerd!`);
+        const result = await response.json();
+        
+        if (response.ok) {
+          toast.success(result.message || `${result.count} afspraken geïmporteerd naar CalDAV`);
+          // Reload events from CalDAV
+          if (typeof window !== 'undefined' && window.location) {
+            window.location.reload();
+          }
         } else {
-          toast.error('Geen geldige afspraken gevonden in dit bestand.');
+          toast.error(result.error || 'Fout bij importeren naar CalDAV');
         }
       } catch (error) {
-        console.error('Error parsing ICS:', error);
-        toast.error('Fout bij het laden van het .ics bestand. Controleer of het bestand geldig is.');
+        console.error('Error importing ICS:', error);
+        toast.error('Fout bij het importeren van het .ics bestand.');
       }
     };
     reader.readAsText(file);
@@ -319,84 +338,6 @@ export function SettingsPage({
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      {cat.isOwner && (
-                        <Popover open={sharingId === cat.id} onOpenChange={(open) => !open && setSharingId(null)}>
-                          <PopoverTrigger asChild>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              onClick={() => setSharingId(cat.id)}
-                              className="h-9 w-9 text-slate-400 hover:text-[#C36322] hover:bg-orange-50 transition-all shrink-0"
-                            >
-                              <Users className="h-4 w-4" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent align="end" className="w-[300px] p-4 shadow-xl border-slate-200">
-                             <h4 className="text-xs font-bold uppercase tracking-widest text-slate-800 mb-4 flex items-center gap-2">
-                               <Users className="w-3 h-3 text-[#C36322]" />
-                               Agenda Delen: {cat.name}
-                             </h4>
-                             
-                             <div className="space-y-4">
-                               <div className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
-                                 <Label className="text-[10px] font-bold text-slate-400 uppercase">Nieuwe gebruiker uitnodigen</Label>
-                                 <div className="flex gap-2">
-                                   <Input 
-                                     placeholder="Gebruikersnaam" 
-                                     value={shareUsername}
-                                     onChange={(e) => setShareUsername(e.target.value)}
-                                     className="h-8 text-xs bg-white"
-                                   />
-                                   <Button 
-                                     size="sm" 
-                                     onClick={handleShare}
-                                     disabled={isSharingLoading || !shareUsername}
-                                     className="h-8 px-2 bg-[#C36322] hover:bg-[#a6541d]"
-                                   >
-                                     <UserPlus className="w-4 h-4" />
-                                   </Button>
-                                 </div>
-                                 <div className="flex items-center gap-2 mt-1">
-                                    <Checkbox 
-                                      id="can-edit" 
-                                      checked={shareCanEdit} 
-                                      onCheckedChange={(checked) => setShareCanEdit(!!checked)}
-                                      className="w-3 h-3 rounded text-[#C36322]"
-                                    />
-                                    <Label htmlFor="can-edit" className="text-[10px] text-slate-500 cursor-pointer">Mag afspraken wijzigen</Label>
-                                 </div>
-                               </div>
-
-                               <div className="space-y-2">
-                                 <Label className="text-[10px] font-bold text-slate-400 uppercase px-1">Toegang verleend aan:</Label>
-                                 {shares.length === 0 ? (
-                                   <p className="text-[10px] text-slate-400 italic px-1">Nog niet gedeeld met anderen.</p>
-                                 ) : (
-                                   <div className="max-h-[150px] overflow-auto pr-1 flex flex-col gap-2">
-                                     {shares.map(s => (
-                                       <div key={s.userId} className="flex items-center justify-between bg-white p-2 rounded-md border border-slate-100 shadow-sm">
-                                         <div className="min-w-0">
-                                            <p className="text-[10px] font-bold text-slate-700 truncate">{s.username}</p>
-                                            <p className="text-[9px] text-slate-400">{s.canEdit ? 'Kan bewerken' : 'Alleen lezen'}</p>
-                                         </div>
-                                         <Button 
-                                           variant="ghost" 
-                                           size="icon" 
-                                           onClick={() => handleUnshare(s.userId)}
-                                           className="h-6 w-6 text-slate-300 hover:text-red-500"
-                                         >
-                                           <X className="h-3 w-3" />
-                                         </Button>
-                                       </div>
-                                     ))}
-                                   </div>
-                                 )}
-                               </div>
-                             </div>
-                          </PopoverContent>
-                        </Popover>
-                      )}
-
                       <Button 
                         variant="ghost" 
                         size="icon" 
@@ -587,18 +528,43 @@ export function SettingsPage({
             </div>
           </section>
 
-          {/* Other settings placeholders */}
-          <section className="pt-8 border-t border-gray-100 opacity-50 pointer-events-none">
+          {/* Account information */}
+          <section className="pt-8 border-t border-gray-100">
             <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4">Account</h3>
-            <div className="bg-gray-50 rounded-xl p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-slate-200" />
-                <div>
-                   <p className="text-sm font-bold text-slate-700">Persoonlijke Gegevens</p>
-                   <p className="text-xs text-slate-500 font-medium">Naam, email en wachtwoord</p>
+            <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-[#C36322] border-2 border-[#C36322] shrink-0">
+                  <User className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex gap-2">
+                      <span className="text-sm font-bold text-slate-700 w-28 shrink-0">Gebruikersnaam:</span>
+                      <span className="text-sm text-slate-600 truncate">{username}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="text-sm font-bold text-slate-700 w-28 shrink-0">CalDAV Server:</span>
+                      <span className="text-sm text-slate-600 truncate">{caldavServerUrl}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-300" />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={async () => {
+                  const granted = await notificationService.requestPermission();
+                  if (granted) {
+                    toast.success("Bureaubladmeldingen ingeschakeld");
+                  } else {
+                    toast.error("Meldingen zijn geweigerd door de browser");
+                  }
+                }}
+                className="mt-4 h-8 text-[10px] font-bold uppercase tracking-widest border-slate-200 hover:bg-slate-50 w-full"
+              >
+                <Bell className="h-3 w-3 mr-1.5 text-[#C36322]" />
+                Bureaubladmeldingen inschakelen
+              </Button>
             </div>
           </section>
         </div>
