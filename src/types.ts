@@ -15,9 +15,6 @@ export interface CalendarEvent {
   calendarId: string;
   color?: string;
   isAllDay?: boolean;
-  recurrenceRule?: string;
-  caldavEventUid?: string;
-  caldavEtag?: string;
 }
 
 export interface CalendarCategory {
@@ -27,33 +24,4 @@ export interface CalendarCategory {
   isVisible: boolean;
   isOwner?: boolean;
   canEdit?: boolean;
-  isCaldav?: boolean;
-  caldavUrl?: string;
-  caldavCalendarId?: string;
-  syncEnabled?: boolean;
-}
-
-export interface User {
-  id: number;
-  email: string;
-  name: string;
-  authMethod?: 'oauth' | 'basic';
-  settings?: any;
-}
-
-export interface CalDAVConfig {
-  serverUrl: string;
-  authMethod: 'oauth' | 'basic';
-  oauth?: {
-    clientId: string;
-    authUrl: string;
-    tokenUrl: string;
-    redirectUri: string;
-  };
-}
-
-export interface AuthState {
-  error?: string;
-  isLoading?: boolean;
-  authorizationUrl?: string;
 }
